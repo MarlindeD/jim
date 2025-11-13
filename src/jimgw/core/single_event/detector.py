@@ -640,7 +640,7 @@ class GroundBased2G(Detector):
             masked_signal, self.sliced_fd_data, self.sliced_psd, df
         )
         match_filtered_snr /= optimal_snr
-
+        self.injected_signal_snr = float(optimal_snr)
         # NOTE: Change this to logging later.
         print(f"For detector {self.name}, the injected signal has:")
         print(f"  - Optimal SNR: {optimal_snr:.4f}")
