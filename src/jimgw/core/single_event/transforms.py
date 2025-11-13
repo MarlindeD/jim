@@ -522,7 +522,7 @@ SymmetricMassRatioToMassRatioTransform = reverse_bijective_transform(
 
 ## ADD COMPACTNESS TO STOPPING FREQUENCY TRANSFORM ##
 @jaxtyped(typechecker=typechecker)
-class CompactnessToFStopTransform(ConditionalBijectiveTransform):
+class CompactnessToStoppingFrequencyTransform(ConditionalBijectiveTransform):
     """
     Transform compactness parameters (C1, C2) to f_stop using component masses (m1, m2).
 
