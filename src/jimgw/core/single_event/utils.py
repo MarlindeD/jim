@@ -54,6 +54,24 @@ def inner_product(
     """
     return complex_inner_product(h1, h2, psd, df).real
 
+def C1_C2_to_f_stop(C1: float, C2: float, m1: float, m2:float):
+    """
+    Transforms the primary compactness C1 and the secondary compactness C2 to the stopping frequecy f_stop.
+    (based on https://arxiv.org/pdf/2505.16380)
+
+    Args:
+        C1 (float): Primary compactness.
+        C2 (float): Seconday compactness.
+        m1 (Float): Primary mass.
+        m2 (Float): Secondary mass.
+
+    Returns:
+        float: The stopping frequency (f_stop)
+    """
+    M_tot = (m1 + m2) * MTSUN
+    f_ISCO = 1/(6**(3/2) * jnp.pi * M_tot)
+    f_ECO = (C1 + C2)**(3/2) * f_ISCO
+    return f_ECO
 
 def m1_m2_to_M_q(m1: Float, m2: Float) -> tuple[Float, Float]:
     """
