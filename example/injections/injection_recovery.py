@@ -334,7 +334,7 @@ def body(args):
     lambda_1_prior = UniformPrior(prior_low_float[4], prior_high_float[4], parameter_names=['lambda_1'])
     lambda_2_prior = UniformPrior(prior_low_float[5], prior_high_float[5], parameter_names=['lambda_2'])
     C1_prior       = UniformPrior(prior_low_float[6], prior_high_float[6], parameter_names=["C1"])
-    C2_prior       = UniformPrior(prior_low_float[7], prior_high_float[7], parameter_names=["C1"])
+    C2_prior       = UniformPrior(prior_low_float[7], prior_high_float[7], parameter_names=["C2"])
     dL_prior       = UniformPrior(prior_low_float[8], prior_high_float[8], parameter_names=['d_L'])
     tc_prior       = UniformPrior(prior_low_float[9], prior_high_float[9], parameter_names=['t_c'])
     cos_iota_prior = CosinePrior(parameter_names=["iota"])
@@ -411,7 +411,7 @@ def body(args):
 
     # Define transforms
     sample_transforms = []
-    likelihood_transforms = [MassRatioToSymmetricMassRatioTransform, CompactnessToStoppingFrequencyTransform]
+    likelihood_transforms = [MassRatioToSymmetricMassRatioTransform, CompactnessToStoppingFrequencyTransform()]
 
     # Create jim object with new API
     jim = Jim(
