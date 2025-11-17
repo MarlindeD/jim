@@ -9,6 +9,8 @@ from jimgw.core.single_event.likelihood import SingleEventLikelihood, BaseTransi
 import corner
 import jax
 from jaxtyping import Array, Float
+from jimgw.core.single_event.utils import C1_C2_to_f_stop, Mc_q_to_m1_m2
+
 
 # from injection_recovery import NAMING
 
@@ -128,10 +130,19 @@ def plot_chains(chains, name, outdir, truths = None, labels = labels):
     else:
         n_params = chains.shape[-1]
 
+    idxphi = labels.index(r'$\phi_c$')
     # Ensure labels match the number of parameters
     if len(labels) != n_params:
         # Use only the first n_params labels or pad if needed
         if len(labels) > n_params:
+            if r'$\phi_c$' in labels:
+                #idx = labels_to_use.index(r'$\phi_c$')
+                #print(idx)
+                #chains = np.delete(chains, idx, 1)
+                #print(chains.shape)
+                labels_to_use = labels
+                labels_to_use.remove(r'$\phi_c$')
+                
             labels_to_use = labels[:n_params]
         else:
             labels_to_use = labels + [f'param_{i}' for i in range(len(labels), n_params)]
@@ -147,7 +158,23 @@ def plot_chains(chains, name, outdir, truths = None, labels = labels):
         idx = labels_to_use.index(r'$\delta$')
         chains[:, idx] = np.arcsin(np.clip(chains[:, idx], -1, 1))
 
+    #Convert C1 and C2 chains to f_stop
+    idxC1 = labels_to_use.index(r"$C_1$")
+    idxC2 = labels_to_use.index(r"$C_2$")
+    idxMc = labels_to_use.index(r'$M_c/M_\odot$')
+    idxq = labels_to_use.index( r'$q$')
+    m1, m2 = Mc_q_to_m1_m2(chains[:, idxMc], chains[:, idxq])
+    f_stop = C1_C2_to_f_stop(chains[:, idxC1], chains[:, idxC2], m1, m2)
+    chains[:, idxC1] = f_stop
+    chains = np.delete(chains, idxC2, 1)
+    labels_to_use[idxC1] = r"f_{stop}"
+    labels_to_use.remove(r"$C_2$")    
+
     chains = np.asarray(chains)
+    if truths is not None:
+        truths = np.delete(truths, idxphi)
+        truths = np.delete(truths, -1)
+        truths = np.delete(truths, -1)
     fig = corner.corner(chains, labels = labels_to_use, truths = truths, hist_kwargs={'density': True}, **default_corner_kwargs)
     fig.savefig(f"{outdir}{name}.png", bbox_inches='tight')  
     

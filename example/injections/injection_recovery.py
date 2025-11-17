@@ -444,6 +444,8 @@ def body(args):
     print("Getting samples from jim")
     chains_dict = jim.get_samples()
     chains = np.stack([chains_dict[key] for key in jim.prior.parameter_names]).T
+    print("Koekeloer hier:")
+    print(jim.prior.parameter_names)
 
     # Get training phase data
     log_prob_training = jim.sampler.resources.get("log_prob_training")
