@@ -54,7 +54,7 @@ def inner_product(
     """
     return complex_inner_product(h1, h2, psd, df).real
 
-def C1_C2_to_f_stop(C1: float, C2: float, m1: float, m2:float):
+def C1_C2_to_f_stop(C1, C2, m1: float, m2:float):
     """
     Transforms the primary compactness C1 and the secondary compactness C2 to the stopping frequecy f_stop.
     (based on https://arxiv.org/pdf/2505.16380)
