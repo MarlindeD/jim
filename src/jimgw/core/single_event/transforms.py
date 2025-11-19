@@ -535,13 +535,13 @@ class CompactnessToStoppingFrequencyTransform(ConditionalBijectiveTransform):
     """
 
     def __init__(self):
-        name_mapping = (["C1", "C2"], ["f_stop"])
+        name_mapping = (["C_1", "C_2"], ["f_stop"])
         conditional_names = ["M_c", "q"]
         super().__init__(name_mapping, conditional_names)
 
         def named_transform(x):
             m1, m2 = Mc_eta_to_m1_m2(x["M_c"], x["eta"])
-            f_stop = C1_C2_to_f_stop(x["C1"], x["C2"], m1, m2)
+            f_stop = C1_C2_to_f_stop(x["C_1"], x["C_2"], m1, m2)
             return {"f_stop": f_stop}
 
         #The inverse function does not exist
