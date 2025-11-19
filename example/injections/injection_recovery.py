@@ -28,8 +28,7 @@ import utils
 import optax
 
 # Names of the parameters and their ranges for sampling parameters for the injection
-#NAMING = ['M_c', 'q', 's1_z', 's2_z', 'lambda_1', 'lambda_2', 'd_L', 't_c', 'phase_c', 'cos_iota', 'psi', 'ra', 'sin_dec']
-NAMING = ['M_c', 'q', 's1_z', 's2_z', 'lambda_1', 'lambda_2', 'C1', 'C2',  'd_L', 't_c', 'phase_c', 'cos_iota', 'psi', 'ra', 'sin_dec']
+NAMING = ['M_c', 'q', 's1_z', 's2_z', 'lambda_1', 'lambda_2', 'C_1', 'C_2', 'a_1', 'a_2', 'd_L', 't_c', 'phase_c', 'cos_iota', 'psi', 'ra', 'sin_dec']
 
 PRIOR = {
         "M_c": [0.8759659737275101, 2.6060030916165484],
@@ -38,8 +37,10 @@ PRIOR = {
         "s2_z": [-0.05, 0.05], 
         "lambda_1": [0.0, 5000.0], 
         "lambda_2": [0.0, 5000.0], 
-        "C1": [0.01, 0.5],
-        "C2": [0.01, 0.5],
+        "C_1": [0.01, 0.5],
+        "C_2": [0.01, 0.5],
+        "a_1": [0, 10],
+        "a_2": [0, 10],
         "d_L": [30.0, 300.0], 
         "t_c": [-0.1, 0.1], 
         "phase_c": [0.0, 2 * jnp.pi], 
@@ -98,8 +99,11 @@ def body(args):
         "outdir": args.outdir,
         "stopping_criterion_global_acc": args.stopping_criterion_global_acc,
         "which_local_sampler": args.which_local_sampler
-    }
-            
+    }        
+
+    if args.use_QM == False:
+        print("Gelukt")
+    
     ### POLYNOMIAL SCHEDULER
     if args.use_scheduler:
         print("Using polynomial learning rate scheduler")
@@ -221,8 +225,9 @@ def body(args):
         # Setup the timing setting for the injection
         epoch = config["duration"] - config["post_trigger_duration"]
         gmst = Time(config["trigger_time"], format='gps').sidereal_time('apparent', 'greenwich').rad
+        #Convert compactness to stopping frequency
         m1, m2 = M_q_to_m1_m2(config['M_c'], config['q'])
-        f_stop = C1_C2_to_f_stop(config['C1'], config["C2"], m1, m2)
+        f_stop = C1_C2_to_f_stop(config['C_1'], config["C_2"], m1, m2)
         # Array of injection parameters
         true_param = {
             'M_c':           config["M_c"],           # chirp mass
@@ -232,8 +237,8 @@ def body(args):
             'lambda_1':      config["lambda_1"],      # tidal deformability of priminary component lambda_1.
             'lambda_2':      config["lambda_2"],      # tidal deformability of secondary component lambda_2.
             'f_stop':        f_stop,                  # stopping frequency
-            #'C1':            config["C1"],            # compactness of the primary component C1
-            #'C2':            config["C2"],            # compactness of the secondary component C2
+            'a_1':           config["a_1"],           # QM parameter of the primary component
+            'a_2':           config["a_2"],           # QM parameter of the secondary component
             'd_L':           config["d_L"],           # luminosity distance
             't_c':           config["t_c"],           # timeshift w.r.t. trigger time
             'phase_c':       config["phase_c"],       # merging phase
@@ -247,7 +252,12 @@ def body(args):
         # Get the true parameter values for the plots
         truths = copy.deepcopy(true_param)
         truths["eta"] = q
-        truths = np.fromiter(truths.values(), dtype=float)
+        if args.use_f_stop is False:
+            truths["f_stop"] = 3000 #Set to a value above LVK max frequency value
+        if args.use_QM is False:
+            truths["a_1"] = 0
+            truths["a_2"] = 0
+        #truths = np.fromiter(truths.values(), dtype=float)
         
         # Setup interferometers
         H1 = get_H1()
@@ -333,13 +343,23 @@ def body(args):
     s2z_prior      = UniformPrior(prior_low_float[3], prior_high_float[3], parameter_names=['s2_z'])
     lambda_1_prior = UniformPrior(prior_low_float[4], prior_high_float[4], parameter_names=['lambda_1'])
     lambda_2_prior = UniformPrior(prior_low_float[5], prior_high_float[5], parameter_names=['lambda_2'])
-    C1_prior       = UniformPrior(prior_low_float[6], prior_high_float[6], parameter_names=["C1"])
-    C2_prior       = UniformPrior(prior_low_float[7], prior_high_float[7], parameter_names=["C2"])
-    dL_prior       = UniformPrior(prior_low_float[8], prior_high_float[8], parameter_names=['d_L'])
-    tc_prior       = UniformPrior(prior_low_float[9], prior_high_float[9], parameter_names=['t_c'])
+    if args.use_f_stop:
+        C1_prior       = UniformPrior(prior_low_float[6], prior_high_float[6], parameter_names=["C_1"])
+        C2_prior       = UniformPrior(prior_low_float[7], prior_high_float[7], parameter_names=["C_2"])
+    else:
+        C1_prior       = UniformPrior(1., 1., parameter_names=["C_1"])
+        C2_prior       = UniformPrior(1., 1., parameter_names=["C_2"])
+    if args.use_QM:
+        a1_prior       = UniformPrior(prior_low_float[8], prior_high_float[8], parameter_names=['a_1'])
+        a2_prior       = UniformPrior(prior_low_float[9], prior_high_float[9], parameter_names=['a_2'])
+    else:
+        a1_prior       = UniformPrior(0., 0., parameter_names=['a_1'])
+        a2_prior       = UniformPrior(0., 0., parameter_names=['a_2'])
+    dL_prior       = UniformPrior(prior_low_float[10], prior_high_float[10], parameter_names=['d_L'])
+    tc_prior       = UniformPrior(prior_low_float[11], prior_high_float[11], parameter_names=['t_c'])
     cos_iota_prior = CosinePrior(parameter_names=["iota"])
-    psi_prior      = UniformPrior(prior_low_float[12], prior_high_float[12], parameter_names=["psi"])
-    ra_prior       = UniformPrior(prior_low_float[13], prior_high_float[13], parameter_names=["ra"])
+    psi_prior      = UniformPrior(prior_low_float[14], prior_high_float[14], parameter_names=["psi"])
+    ra_prior       = UniformPrior(prior_low_float[15], prior_high_float[15], parameter_names=["ra"])
     sin_dec_prior  = SinePrior(parameter_names=["dec"])
 
     # Compose the prior - conditionally include phase_c based on marginalization setting
@@ -352,13 +372,15 @@ def body(args):
             lambda_2_prior,
             C1_prior,
             C2_prior,
+            a1_prior,
+            a2_prior,
             dL_prior,
             tc_prior,
     ]
 
     # Only include phase_c in prior if NOT marginalizing over phase
     if not args.marginalize_phase:
-        phic_prior = UniformPrior(prior_low_float[10], prior_high_float[10], parameter_names=['phase_c'])
+        phic_prior = UniformPrior(prior_low_float[12], prior_high_float[12], parameter_names=['phase_c'])
         prior_list.append(phic_prior)
     else:
         print("INFO: Phase marginalization enabled - phase_c will be marginalized analytically and excluded from the prior")
@@ -444,7 +466,7 @@ def body(args):
     print("Getting samples from jim")
     chains_dict = jim.get_samples()
     chains = np.stack([chains_dict[key] for key in jim.prior.parameter_names]).T
-    print("Koekeloer hier:")
+    print("Jim prior parameter names:")
     print(jim.prior.parameter_names)
 
     # Get training phase data
@@ -490,8 +512,8 @@ def body(args):
     # Finally, copy over this script to the outdir for reproducibility
     shutil.copy2(__file__, outdir + "copy_injection_recovery.py")
     
-    print("Saving the jim hyperparameters")
-    jim.save_hyperparameters(outdir = outdir)
+    #print("Saving the jim hyperparameters")
+    #jim.save_hyperparameters(outdir = outdir)
     
     end_time = time.time()
     runtime = end_time - start_time

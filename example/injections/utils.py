@@ -14,8 +14,7 @@ from jimgw.core.single_event.utils import C1_C2_to_f_stop, Mc_q_to_m1_m2
 
 # from injection_recovery import NAMING
 
-#NAMING = ['M_c', 'q', 's1_z', 's2_z', 'lambda_1', 'lambda_2', 'd_L', 't_c', 'phase_c', 'cos_iota', 'psi', 'ra', 'sin_dec']
-NAMING = ['M_c', 'q', 's1_z', 's2_z', 'lambda_1', 'lambda_2', 'C1', 'C2', 'd_L', 't_c', 'phase_c', 'cos_iota', 'psi', 'ra', 'sin_dec']
+NAMING = ['M_c', 'q', 's1_z', 's2_z', 'lambda_1', 'lambda_2', 'C_1', 'C_2', 'a_1', 'a_2', 'd_L', 't_c', 'phase_c', 'cos_iota', 'psi', 'ra', 'sin_dec']
 
 
 default_corner_kwargs = dict(bins=40, 
@@ -50,7 +49,7 @@ matplotlib_params = {"axes.grid": True,
 
 plt.rcParams.update(matplotlib_params)
 
-labels = [r'$M_c/M_\odot$', r'$q$', r'$\chi_1$', r'$\chi_2$', r'$\Lambda$', r'$\delta\Lambda$', r"$C_1$", r"$C_2$", r'$d_{\rm{L}}/{\rm Mpc}$', r'$t_c$', r'$\phi_c$', r'$\iota$', r'$\psi$', r'$\alpha$', r'$\delta$']
+labels = [r'$M_c/M_\odot$', r'$q$', r'$\chi_1$', r'$\chi_2$', r'$\Lambda$', r'$\delta\Lambda$', r"$C_1$", r"$C_2$", r"$a_1$", r"$a_2$", r'$d_{\rm{L}}/{\rm Mpc}$', r'$t_c$', r'$\phi_c$', r'$\iota$', r'$\psi$', r'$\alpha$', r'$\delta$']
 
 ############################################
 ### Injection recovery utility functions ###
@@ -130,16 +129,14 @@ def plot_chains(chains, name, outdir, truths = None, labels = labels):
     else:
         n_params = chains.shape[-1]
 
-    idxphi = labels.index(r'$\phi_c$')
+    idxphi = labels.index(r'$\phi_c$') #Index of phi_c
     # Ensure labels match the number of parameters
     if len(labels) != n_params:
         # Use only the first n_params labels or pad if needed
         if len(labels) > n_params:
             if r'$\phi_c$' in labels:
                 #idx = labels_to_use.index(r'$\phi_c$')
-                #print(idx)
                 #chains = np.delete(chains, idx, 1)
-                #print(chains.shape)
                 labels_to_use = labels
                 labels_to_use.remove(r'$\phi_c$')
                 
@@ -149,7 +146,7 @@ def plot_chains(chains, name, outdir, truths = None, labels = labels):
     else:
         labels_to_use = labels
 
-    # Find index of cos iota and sin dec if they exist 
+    # Find index of cos iota and sin dec if they exist
     if r'$\iota$' in labels_to_use:
         idx = labels_to_use.index(r'$\iota$')
         chains[:, idx] = np.arccos(np.clip(chains[:, idx], -1, 1))
@@ -157,24 +154,55 @@ def plot_chains(chains, name, outdir, truths = None, labels = labels):
     if r'$\delta$' in labels_to_use:
         idx = labels_to_use.index(r'$\delta$')
         chains[:, idx] = np.arcsin(np.clip(chains[:, idx], -1, 1))
-
+    
     #Convert C1 and C2 chains to f_stop
+    use_f_stop = True
     idxC1 = labels_to_use.index(r"$C_1$")
     idxC2 = labels_to_use.index(r"$C_2$")
     idxMc = labels_to_use.index(r'$M_c/M_\odot$')
     idxq = labels_to_use.index( r'$q$')
-    m1, m2 = Mc_q_to_m1_m2(chains[:, idxMc], chains[:, idxq])
-    f_stop = C1_C2_to_f_stop(chains[:, idxC1], chains[:, idxC2], m1, m2)
-    chains[:, idxC1] = f_stop
-    chains = np.delete(chains, idxC2, 1)
-    labels_to_use[idxC1] = r"f_{stop}"
-    labels_to_use.remove(r"$C_2$")    
+    #If compactness > 0.5 it is "turned off" and does not need to be plotted
+    if chains[:, idxC1][0] > 0.5:
+        chains = np.delete(chains, idxC2, 1)
+        chains = np.delete(chains, idxC1, 1)
+        labels_to_use.remove(r"$C_1$")
+        labels_to_use.remove(r"$C_2$")
+        use_f_stop = False
+    else:
+        m1, m2 = Mc_q_to_m1_m2(chains[:, idxMc], chains[:, idxq]) 
+        f_stop = C1_C2_to_f_stop(chains[:, idxC1], chains[:, idxC2], m1, m2)
+        #Replace C1 by f_stop and remove C2 from the chains...
+        chains[:, idxC1] = f_stop
+        chains = np.delete(chains, idxC2, 1)
+        #... and the labels
+        labels_to_use[idxC1] = r"f_{stop}"
+        labels_to_use.remove(r"$C_2$")
+
+    #Check if a1 and a2 are sampled
+    idxa1 = labels_to_use.index(r"$a_1$")
+    idxa2 = labels_to_use.index(r"$a_2$")
+    a1 = chains[:,idxa1]
+    if sum(a1) == 0:
+        chains = np.delete(chains, idxa1, 1)
+        labels_to_use.remove(r"$a_1$")
+        idxa2 = labels_to_use.index(r"$a_2$")
+        chains = np.delete(chains, idxa2, 1)
+        labels_to_use.remove(r"$a_2$")
 
     chains = np.asarray(chains)
+    #Get rid of truths for which we have no chains
     if truths is not None:
-        truths = np.delete(truths, idxphi)
-        truths = np.delete(truths, -1)
-        truths = np.delete(truths, -1)
+        #No chains for phi_c -> TO DO: this is not always the case, check when to plot and when not to plot
+        del truths['phase_c']
+        #No chains for gmst and trigger_time
+        del truths["gmst"]
+        del truths["trigger_time"]
+        if sum(a1) == 0:
+            del truths["a_1"]
+            del truths["a_2"]
+        if use_f_stop == False:
+            del truths["f_stop"]
+        truths = np.fromiter(truths.values(), dtype=float)
     fig = corner.corner(chains, labels = labels_to_use, truths = truths, hist_kwargs={'density': True}, **default_corner_kwargs)
     fig.savefig(f"{outdir}{name}.png", bbox_inches='tight')  
     
@@ -609,6 +637,18 @@ def get_parser(**kwargs):
         type=bool,
         default=True,
         help="Whether to use phase marginalization in the likelihood. If True, phase_c will be marginalized over analytically and removed from the prior."
+    )
+    parser.add_argument(
+        "--use-QM",
+        type= bool,
+        default = False,
+        help="Whether to use QM effects or not"
+    )
+    parser.add_argument(
+        "--use-f-stop",
+        type = bool,
+        default = False,
+        help = "Wether to use the stopping frequency"
     )
     return parser
 

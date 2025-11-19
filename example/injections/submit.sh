@@ -28,3 +28,5 @@ python injection_recovery.py \
     --n-local-steps 10 \
     --n-global-steps 10 \
     --waveform-approximant TaylorF2QM_taper \
+    --use-QM True \
+    --use-f-stop True \
