@@ -30,3 +30,32 @@ docs/_build/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+.vscode/launch.json
+.
+data
+.vscode/settings.json
+
+slurm_script*
+build*
+log*
+*.swp
+*H1.txt
+*L1.txt
+*V1.txt
+test_data
+
+# Out directory of runs
+outdir
+jim.code-workspace
+.tmp_dagster*
+dagster_tmp/*
+
+.out
