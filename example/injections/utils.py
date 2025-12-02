@@ -650,6 +650,18 @@ def get_parser(**kwargs):
         default = False,
         help = "Wether to use the stopping frequency"
     )
+    parser.add_argument(
+        "--sampler",
+        type=str,
+        default="flowMC",
+        help="Which sampler to use. Options are 'flowMC' and 'blackjax-ns'"
+    )
+    parser.add_argument(
+        "--n-live",
+        type=int,
+        default=1000,
+        help="Number of live points for nested sampling"
+    )
     return parser
 
 def main():
