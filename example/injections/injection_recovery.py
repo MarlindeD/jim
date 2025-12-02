@@ -3,7 +3,6 @@ Perform an injection recovery using jim and flowMC. Assumes aligned spin and BNS
 """
 import os
 import numpy as np
-import pandas as pd
 import argparse
 # Regular imports 
 import argparse
@@ -19,24 +18,26 @@ import jax.numpy as jnp
 from jimgw.core.jim import Jim
 from jimgw.core.single_event.detector import get_H1, get_L1, get_V1
 from jimgw.core.single_event.likelihood import BaseTransientLikelihoodFD, HeterodynedTransientLikelihoodFD, HeterodynedPhaseMarginalizedLikelihoodFD
-from jimgw.core.single_event.waveform import RippleTaylorF2, RippleIMRPhenomD_NRTidalv2
+from jimgw.core.single_event.waveform import RippleTaylorF2, RippleIMRPhenomD_NRTidalv2, RippleTaylorF2QM_taper
 from jimgw.core.prior import UniformPrior, CombinePrior, CosinePrior, SinePrior
 from jimgw.core.single_event.data import Data
-from jimgw.core.single_event.transforms import MassRatioToSymmetricMassRatioTransform
+from jimgw.core.single_event.transforms import MassRatioToSymmetricMassRatioTransform, CompactnessToStoppingFrequencyTransform
+from jimgw.core.single_event.utils import C1_C2_to_f_stop, M_q_to_m1_m2
 import utils
-
-from blackjax_ns import (
-    run_blackjax_ns_gw,
-    setup_sample_transforms,
-    create_logprior_fn,
-    create_loglikelihood_fn,
-    create_unit_cube_stepper
-)
 
 import optax
 
+# from blackjax_ns import (
+#     run_blackjax_ns_gw,
+#     setup_sample_transforms,
+#     create_logprior_fn,
+#     create_loglikelihood_fn,
+#     create_unit_cube_stepper
+# )
+
 # Names of the parameters and their ranges for sampling parameters for the injection
-NAMING = ['M_c', 'q', 's1_z', 's2_z', 'lambda_1', 'lambda_2', 'd_L', 't_c', 'phase_c', 'cos_iota', 'psi', 'ra', 'sin_dec']
+NAMING = ['M_c', 'q', 's1_z', 's2_z', 'lambda_1', 'lambda_2', 'C_1', 'C_2', 'a_1', 'a_2', 'd_L', 't_c', 'phase_c', 'cos_iota', 'psi', 'ra', 'sin_dec']
+
 PRIOR = {
         "M_c": [0.8759659737275101, 2.6060030916165484],
         "q": [0.5, 1.0], 
@@ -44,6 +45,10 @@ PRIOR = {
         "s2_z": [-0.05, 0.05], 
         "lambda_1": [0.0, 5000.0], 
         "lambda_2": [0.0, 5000.0], 
+        "C_1": [0.01, 0.5],
+        "C_2": [0.01, 0.5],
+        "a_1": [0, 10],
+        "a_2": [0, 10],
         "d_L": [30.0, 300.0], 
         "t_c": [-0.1, 0.1], 
         "phase_c": [0.0, 2 * jnp.pi], 
@@ -102,8 +107,8 @@ def body(args):
         "outdir": args.outdir,
         "stopping_criterion_global_acc": args.stopping_criterion_global_acc,
         "which_local_sampler": args.which_local_sampler
-    }
-            
+    }        
+    
     ### POLYNOMIAL SCHEDULER
     if args.use_scheduler:
         print("Using polynomial learning rate scheduler")
@@ -118,13 +123,15 @@ def body(args):
     print(f"Saving output to {args.outdir}")
     
     # Fetch waveform used
-    supported_waveforms = ["TaylorF2", "NRTidalv2", "IMRPhenomD_NRTidalv2"]
+    supported_waveforms = ["TaylorF2", "NRTidalv2", "IMRPhenomD_NRTidalv2", "TaylorF2QM_taper"]
     if args.waveform_approximant not in supported_waveforms:
         print(f"Waveform approximant {args.waveform_approximant} not supported. Supported waveforms are {supported_waveforms}. Changing to TaylorF2.")
         args.waveform_approximant = "TaylorF2"
     
     if args.waveform_approximant == "TaylorF2":
         ripple_waveform_fn = RippleTaylorF2
+    elif args.waveform_approximant == "TaylorF2QM_taper":
+        ripple_waveform_fn = RippleTaylorF2QM_taper
     elif args.waveform_approximant in ["IMRPhenomD_NRTidalv2", "NRTv2", "NRTidalv2"]:
         ripple_waveform_fn = RippleIMRPhenomD_NRTidalv2
     else:
@@ -134,7 +141,7 @@ def body(args):
     if args.outdir[-1] != "/":
         args.outdir += "/"
 
-    outdir = f"{args.outdir}injection_{args.N}_{args.sampler}/"
+    outdir = f"{args.outdir}injection_{args.N}/"
     
     # Get the prior bounds, both as 1D and 2D arrays
     prior_ranges = jnp.array([PRIOR[name] for name in naming])
@@ -213,16 +220,19 @@ def body(args):
         
         # Start injections
         print("Injecting signals . . .")
-        config['waveform'] = ripple_waveform_fn(f_ref=config["fref"])
+        waveform = ripple_waveform_fn(f_ref=config["fref"])
 
         # convert injected mass ratio to eta, and apply arccos and arcsin
         q = config["q"]
         eta = q / (1 + q) ** 2
         iota = float(jnp.arccos(config["cos_iota"]))
-        dec = float(jnp.arcsin(config["sin_dec"]))
+        dec = float(jnp.arcsin(config["sin_dec"]))        
         # Setup the timing setting for the injection
         epoch = config["duration"] - config["post_trigger_duration"]
         gmst = Time(config["trigger_time"], format='gps').sidereal_time('apparent', 'greenwich').rad
+        #Convert compactness to stopping frequency
+        m1, m2 = M_q_to_m1_m2(config['M_c'], config['q'])
+        f_stop = C1_C2_to_f_stop(config['C_1'], config["C_2"], m1, m2)
         # Array of injection parameters
         true_param = {
             'M_c':           config["M_c"],           # chirp mass
@@ -231,6 +241,9 @@ def body(args):
             's2_z':          config["s2_z"],          # aligned spin of secondary component s2_z.
             'lambda_1':      config["lambda_1"],      # tidal deformability of priminary component lambda_1.
             'lambda_2':      config["lambda_2"],      # tidal deformability of secondary component lambda_2.
+            'f_stop':        f_stop,                  # stopping frequency
+            'a_1':           config["a_1"],           # QM parameter of the primary component
+            'a_2':           config["a_2"],           # QM parameter of the secondary component
             'd_L':           config["d_L"],           # luminosity distance
             't_c':           config["t_c"],           # timeshift w.r.t. trigger time
             'phase_c':       config["phase_c"],       # merging phase
@@ -241,22 +254,27 @@ def body(args):
             'gmst':          gmst,                    # Greenwich mean sidereal time
             'trigger_time':  config["trigger_time"]   # trigger time
             }
-        
         # Get the true parameter values for the plots
+        if args.waveform_approximant == "TaylorF2":
+            del true_param["a_1"]
+            del true_param["a_2"]
+            del true_param["f_stop"]
         truths = copy.deepcopy(true_param)
         truths["eta"] = q
-        truths = np.fromiter(truths.values(), dtype=float)
+        if args.use_f_stop is False:
+            truths["f_stop"] = 3000 #Set to a value above LVK max frequency value
+        if args.use_QM is False:
+            truths["a_1"] = 0
+            truths["a_2"] = 0
+
+        #truths = np.fromiter(truths.values(), dtype=float)
         
         # Setup interferometers
         H1 = get_H1()
         L1 = get_L1()
         V1 = get_V1()
         ifos = [H1, L1, V1]
-        psd_files = [
-            "./psds/aLIGO_ZERO_DET_high_P_psd.txt",
-            "./psds/aLIGO_ZERO_DET_high_P_psd.txt",
-            "./psds/AdV_psd.txt"
-        ]
+        psd_files = ["./psds/aLIGO_ZERO_DET_high_P_psd.txt", "./psds/aLIGO_ZERO_DET_high_P_psd.txt", "./psds/AdV_psd.txt"]
 
         # Set PSDs first (required before inject_signal)
         from jimgw.core.single_event.data import PowerSpectrum
@@ -281,7 +299,7 @@ def body(args):
                 duration=config["duration"],
                 sampling_frequency=config["f_sampling"],
                 epoch=epoch,
-                waveform_model=config['waveform'],
+                waveform_model=waveform,
                 parameters=true_param,
                 rng_key=subkey
             )
@@ -335,15 +353,42 @@ def body(args):
     s2z_prior      = UniformPrior(prior_low_float[3], prior_high_float[3], parameter_names=['s2_z'])
     lambda_1_prior = UniformPrior(prior_low_float[4], prior_high_float[4], parameter_names=['lambda_1'])
     lambda_2_prior = UniformPrior(prior_low_float[5], prior_high_float[5], parameter_names=['lambda_2'])
-    dL_prior       = UniformPrior(prior_low_float[6], prior_high_float[6], parameter_names=['d_L'])
-    tc_prior       = UniformPrior(prior_low_float[7], prior_high_float[7], parameter_names=['t_c'])
+    if args.use_f_stop:
+        C1_prior       = UniformPrior(prior_low_float[6], prior_high_float[6], parameter_names=["C_1"])
+        C2_prior       = UniformPrior(prior_low_float[7], prior_high_float[7], parameter_names=["C_2"])
+    else:
+        C1_prior       = UniformPrior(1., 1., parameter_names=["C_1"])
+        C2_prior       = UniformPrior(1., 1., parameter_names=["C_2"])
+    if args.use_QM:
+        a1_prior       = UniformPrior(prior_low_float[8], prior_high_float[8], parameter_names=['a_1'])
+        a2_prior       = UniformPrior(prior_low_float[9], prior_high_float[9], parameter_names=['a_2'])
+    else:
+        a1_prior       = UniformPrior(0., 0., parameter_names=['a_1'])
+        a2_prior       = UniformPrior(0., 0., parameter_names=['a_2'])
+    dL_prior       = UniformPrior(prior_low_float[10], prior_high_float[10], parameter_names=['d_L'])
+    tc_prior       = UniformPrior(prior_low_float[11], prior_high_float[11], parameter_names=['t_c'])
     cos_iota_prior = CosinePrior(parameter_names=["iota"])
-    psi_prior      = UniformPrior(prior_low_float[10], prior_high_float[10], parameter_names=["psi"])
-    ra_prior       = UniformPrior(prior_low_float[11], prior_high_float[11], parameter_names=["ra"])
+    psi_prior      = UniformPrior(prior_low_float[14], prior_high_float[14], parameter_names=["psi"])
+    ra_prior       = UniformPrior(prior_low_float[15], prior_high_float[15], parameter_names=["ra"])
     sin_dec_prior  = SinePrior(parameter_names=["dec"])
 
     # Compose the prior - conditionally include phase_c based on marginalization setting
     prior_list = [
+            Mc_prior,
+            q_prior,
+            s1z_prior,
+            s2z_prior,
+            lambda_1_prior,
+            lambda_2_prior,
+            C1_prior,
+            C2_prior,
+            a1_prior,
+            a2_prior,
+            dL_prior,
+            tc_prior,
+    ]
+    if args.waveform_approximant == "TaylorF2":
+        prior_list = [
             Mc_prior,
             q_prior,
             s1z_prior,
@@ -356,7 +401,7 @@ def body(args):
 
     # Only include phase_c in prior if NOT marginalizing over phase
     if not args.marginalize_phase:
-        phic_prior = UniformPrior(prior_low_float[8], prior_high_float[8], parameter_names=['phase_c'])
+        phic_prior = UniformPrior(prior_low_float[12], prior_high_float[12], parameter_names=['phase_c'])
         prior_list.append(phic_prior)
     else:
         print("INFO: Phase marginalization enabled - phase_c will be marginalized analytically and excluded from the prior")
@@ -367,8 +412,8 @@ def body(args):
             ra_prior,
             sin_dec_prior,
     ])
-    
-    config['prior'] = CombinePrior(prior_list)
+
+    complete_prior = CombinePrior(prior_list)
 
     # Save the prior bounds
     print("Saving prior bounds")
@@ -393,72 +438,30 @@ def body(args):
         print("Using standard heterodyned likelihood")
 
     # Use the fmin and fmax defined at the top of the script
-    config['likelihood_transforms'] = [MassRatioToSymmetricMassRatioTransform] # I think you're sampling in q, but interpreting it as eta at the moment. I believe this should fix that
-    config['likelihood'] = likelihood_class(
+    likelihood = likelihood_class(
         ifos,
-        waveform=config['waveform'],
+        waveform=waveform,
         trigger_time=config["trigger_time"],
         f_min=fmin,
         f_max=fmax,
         n_bins=args.relative_binning_binsize,
         ref_params=ref_params,
-        prior=config['prior'] if not ref_params else None,
-        likelihood_transforms=config['likelihood_transforms']
+        prior=complete_prior if not ref_params else None,
         )
     
     # Save the ref params
-    utils.save_relative_binning_ref_params(config['likelihood'], outdir)
+    utils.save_relative_binning_ref_params(likelihood, outdir)
 
     # Define transforms
     sample_transforms = []
-    config['sample_transforms'] = sample_transforms
-
-
-    # This is a very inelegant implementation of mine, but it's a quick one
-    if args.sampler == 'flowMC':
-        print("SAMPLER: Running flowMC sampler")
-        run_flowMC(config, args)
-
-    elif args.sampler == 'blackjax-ns':
-        # Setup transforms and functions for blackjax_ns
-        print("SAMPLER: Setting up blackjax_ns sampler")
-        config['sample_transforms'] = setup_sample_transforms(config['prior'].base_prior, ifos=ifos, phase_marginalization=args.marginalize_phase)
-        config['logprior_fn'] = create_logprior_fn(config['prior'], config['sample_transforms'])
-        config['loglikelihood_fn'] = create_loglikelihood_fn(config['likelihood'], config['sample_transforms'], config['likelihood_transforms'])
-        config['unit_cube_stepper'] = create_unit_cube_stepper(config['prior'], config['sample_transforms'])
-
-        print("SAMPLER: Running blackjax_ns sampler")
-        samples_df = run_blackjax_ns_gw(config, args)
-
-        # Save samples
-        print("Saving blackjax_ns samples")
-        samples_df.to_csv(config['outdir'] + 'blackjax_ns_samples.csv', index=False)
-
-        # Add anything else you want to save from blackjax_ns here. The run_blackjax_ns_gw function will likely need to be modified to return more data.
-
-    else: 
-        print(f"Sampler {args['sampler']} not recognized. Supported samplers are 'flowMC' and 'blackjax_ns'.")
-        return
-    
-    end_time = time.time()
-    runtime = end_time - start_time
-    print(f"Time taken: {runtime} seconds ({(runtime)/60} minutes)")
-    
-    print(f"Saving runtime")
-    with open(outdir + 'runtime.txt', 'w') as file:
-        file.write(str(runtime))
-    
-    print("Finished injection recovery successfully!")
-
-
-def run_flowMC(config, args):
-    hyperparameters = config['hyperparameters']
+    likelihood_transforms = [MassRatioToSymmetricMassRatioTransform, CompactnessToStoppingFrequencyTransform()]
+ 
     # Create jim object with new API
     jim = Jim(
-        config['likelihood'],
-        config['prior'],
-        sample_transforms=config['sample_transforms'],
-        likelihood_transforms=config['likelihood_transforms'],
+        likelihood,
+        complete_prior,
+        sample_transforms=sample_transforms,
+        likelihood_transforms=likelihood_transforms,
         n_chains=hyperparameters["n_chains"],
         n_local_steps=hyperparameters["n_local_steps"],
         n_global_steps=hyperparameters["n_global_steps"],
@@ -475,6 +478,8 @@ def run_flowMC(config, args):
         verbose=hyperparameters["verbose"],
     )
     
+    # Start the sampling
+    jim.sample()
         
     # === Show results, save output ===
 
@@ -482,6 +487,8 @@ def run_flowMC(config, args):
     print("Getting samples from jim")
     chains_dict = jim.get_samples()
     chains = np.stack([chains_dict[key] for key in jim.prior.parameter_names]).T
+    print("Jim prior parameter names:")
+    print(jim.prior.parameter_names)
 
     # Get training phase data
     log_prob_training = jim.sampler.resources.get("log_prob_training")
@@ -490,7 +497,7 @@ def run_flowMC(config, args):
     loss_vals = jim.sampler.resources.get("loss")
 
     if log_prob_training is not None:
-        name = config['outdir'] + f'results_training.npz'
+        name = outdir + f'results_training.npz'
         print(f"Saving training results to {name}")
         log_prob = log_prob_training.data if hasattr(log_prob_training, 'data') else log_prob_training
         local_accs = jnp.mean(local_accs_training.data if hasattr(local_accs_training, 'data') else local_accs_training, axis=0)
@@ -498,10 +505,10 @@ def run_flowMC(config, args):
         loss_data = loss_vals.data if hasattr(loss_vals, 'data') else loss_vals
         np.savez(name, log_prob=log_prob, local_accs=local_accs, global_accs=global_accs, loss_vals=loss_data)
 
-        utils.plot_accs(local_accs, "Local accs (training)", "local_accs_training", config['outdir'])
-        utils.plot_accs(global_accs, "Global accs (training)", "global_accs_training", config['outdir'])
+        utils.plot_accs(local_accs, "Local accs (training)", "local_accs_training", outdir)
+        utils.plot_accs(global_accs, "Global accs (training)", "global_accs_training", outdir)
         # utils.plot_loss_vals(loss_data, "Loss", "loss_vals", outdir) # FIXME: might be broken
-        utils.plot_log_prob(log_prob, "Log probability (training)", "log_prob_training", config['outdir'])
+        utils.plot_log_prob(log_prob, "Log probability (training)", "log_prob_training", outdir)
 
     # Get production phase data
     log_prob_production = jim.sampler.resources.get("log_prob_production")
@@ -509,26 +516,35 @@ def run_flowMC(config, args):
     global_accs_production = jim.sampler.resources.get("global_accs_production")
 
     if log_prob_production is not None:
-        name = config['outdir'] + f'results_production.npz'
+        name = outdir + f'results_production.npz'
         print(f"Saving production results to {name}")
         log_prob = log_prob_production.data if hasattr(log_prob_production, 'data') else log_prob_production
         local_accs = jnp.mean(local_accs_production.data if hasattr(local_accs_production, 'data') else local_accs_production, axis=0)
         global_accs = jnp.mean(global_accs_production.data if hasattr(global_accs_production, 'data') else global_accs_production, axis=0)
         np.savez(name, chains=chains, log_prob=log_prob, local_accs=local_accs, global_accs=global_accs)
 
-        utils.plot_accs(local_accs, "Local accs (production)", "local_accs_production", config['outdir'])
-        utils.plot_accs(global_accs, "Global accs (production)", "global_accs_production", config['outdir'])
-        utils.plot_log_prob(log_prob, "Log probability (production)", "log_prob_production", config['outdir'])
+        utils.plot_accs(local_accs, "Local accs (production)", "local_accs_production", outdir)
+        utils.plot_accs(global_accs, "Global accs (production)", "global_accs_production", outdir)
+        utils.plot_log_prob(log_prob, "Log probability (production)", "log_prob_production", outdir)
 
     # Plot the chains as corner plots
-    utils.plot_chains(chains, "chains_production", config['outdir'], truths = truths)
+    utils.plot_chains(chains, "chains_production", outdir, truths = truths)
     
     # Finally, copy over this script to the outdir for reproducibility
-    shutil.copy2(__file__, config['outdir'] + "copy_injection_recovery.py")
+    shutil.copy2(__file__, outdir + "copy_injection_recovery.py")
     
-    print("Saving the jim hyperparameters")
-    jim.save_hyperparameters(outdir = config['outdir'])
-
+    #print("Saving the jim hyperparameters")
+    #jim.save_hyperparameters(outdir = outdir)
+    
+    end_time = time.time()
+    runtime = end_time - start_time
+    print(f"Time taken: {runtime} seconds ({(runtime)/60} minutes)")
+    
+    print(f"Saving runtime")
+    with open(outdir + 'runtime.txt', 'w') as file:
+        file.write(str(runtime))
+    
+    print("Finished injection recovery successfully!")
 
 ############
 ### MAIN ###

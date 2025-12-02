@@ -22,6 +22,7 @@ from jimgw.core.single_event.utils import (
     spin_angles_to_cartesian_spin,
     cartesian_spin_to_spin_angles,
     carte_to_spherical_angles,
+    C1_C2_to_f_stop,
 )
 from jimgw.core.single_event.gps_times import (
     greenwich_mean_sidereal_time as compute_gmst,
@@ -487,3 +488,36 @@ ChirpMassSymmetricMassRatioToComponentMassesTransform = reverse_bijective_transf
 SymmetricMassRatioToMassRatioTransform = reverse_bijective_transform(
     MassRatioToSymmetricMassRatioTransform
 )
+
+## ADD COMPACTNESS TO STOPPING FREQUENCY TRANSFORM ##
+@jaxtyped(typechecker=typechecker)
+class CompactnessToStoppingFrequencyTransform(ConditionalBijectiveTransform):
+    """
+    Transform compactness parameters (C1, C2) to f_stop using component masses (m1, m2).
+
+    Parameters
+    ----------
+    name_mapping : tuple[list[str], list[str]]
+        Mapping between input (C1, C2) and output (f_stop).
+    conditional_names : list[str]
+        Conditional parameters required by the transformation, i.e. m1 and m2.
+    """
+
+    def __init__(self):
+        name_mapping = (["C_1", "C_2"], ["f_stop"])
+        conditional_names = ["M_c", "q"]
+        super().__init__(name_mapping, conditional_names)
+
+        def named_transform(x):
+            m1, m2 = Mc_eta_to_m1_m2(x["M_c"], x["eta"])
+            f_stop = C1_C2_to_f_stop(x["C_1"], x["C_2"], m1, m2)
+            return {"f_stop": f_stop}
+
+        #The inverse function does not exist
+        def named_inverse_transform(x):
+            raise NotImplementedError(
+                "Inverse transform for CompactnessToFStopTransform is not defined."
+            )
+
+        self.transform_func = named_transform
+        self.inverse_transform_func = named_inverse_transform

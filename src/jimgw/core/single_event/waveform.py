@@ -8,6 +8,7 @@ from ripplegw.waveforms.TaylorF2 import gen_TaylorF2_hphc
 from ripplegw.waveforms.IMRPhenomD_NRTidalv2 import gen_IMRPhenomD_NRTidalv2_hphc
 from ripplegw.waveforms.IMRPhenomXAS import gen_IMRPhenomXAS_hphc
 from ripplegw.waveforms.IMRPhenomXAS_NRTidalv3 import gen_IMRPhenomXAS_NRTidalv3_hphc
+from ripplegw.waveforms.TaylorF2QM_taper import gen_TaylorF2QM_hphc
 
 
 class Waveform(ABC):
@@ -129,6 +130,52 @@ class RippleTaylorF2(Waveform):
 
     def __repr__(self):
         return f"RippleTaylorF2(f_ref={self.f_ref})"
+
+## ADD TAYLORF2QM TO WAVEFOMRS ## 
+class RippleTaylorF2QM_taper(Waveform):
+    f_ref: float
+    use_lambda_tildes: bool
+
+    def __init__(self, f_ref: float = 20.0, use_lambda_tildes: bool = False):
+        self.f_ref = f_ref
+        self.use_lambda_tildes = use_lambda_tildes
+
+    def __call__(
+        self, frequency: Float[Array, " n_dim"], params: dict[str, Float]
+    ) -> dict[str, Float[Array, " n_dim"]]:
+        output = {}
+
+        if self.use_lambda_tildes:
+            first_lambda_param = params["lambda_tilde"]
+            second_lambda_param = params["delta_lambda_tilde"]
+        else:
+            first_lambda_param = params["lambda_1"]
+            second_lambda_param = params["lambda_2"]
+
+        theta = jnp.array(
+            [
+                params["M_c"],
+                params["eta"],
+                params["s1_z"],
+                params["s2_z"],
+                first_lambda_param,
+                second_lambda_param,
+                params["f_stop"],
+                params["d_L"],
+                0,
+                params["phase_c"],
+                params["iota"],
+            ]
+        )
+        hp, hc = gen_TaylorF2QM_hphc(
+            frequency, theta, self.f_ref, use_lambda_tildes=self.use_lambda_tildes
+        )
+        output["p"] = hp
+        output["c"] = hc
+        return output
+
+    def __repr__(self):
+        return f"RippleTaylorF2QM_taper(f_ref={self.f_ref})"
 
 
 class RippleIMRPhenomD_NRTidalv2(Waveform):
@@ -310,6 +357,7 @@ waveform_preset = {
     "RippleIMRPhenomD": RippleIMRPhenomD,
     "RippleIMRPhenomPv2": RippleIMRPhenomPv2,
     "RippleTaylorF2": RippleTaylorF2,
+    "RippleTaylorF2QM_taper": RippleTaylorF2QM_taper,
     "RippleIMRPhenomD_NRTidalv2": RippleIMRPhenomD_NRTidalv2,
     "RippleIMRPhenomXAS": RippleIMRPhenomXAS,
     "RippleIMRPhenomXAS_NRTidalv3": RippleIMRPhenomXAS_NRTidalv3,
