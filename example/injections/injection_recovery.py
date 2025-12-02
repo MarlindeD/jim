@@ -27,6 +27,14 @@ import utils
 
 import optax
 
+# from blackjax_ns import (
+#     run_blackjax_ns_gw,
+#     setup_sample_transforms,
+#     create_logprior_fn,
+#     create_loglikelihood_fn,
+#     create_unit_cube_stepper
+# )
+
 # Names of the parameters and their ranges for sampling parameters for the injection
 NAMING = ['M_c', 'q', 's1_z', 's2_z', 'lambda_1', 'lambda_2', 'C_1', 'C_2', 'a_1', 'a_2', 'd_L', 't_c', 'phase_c', 'cos_iota', 'psi', 'ra', 'sin_dec']
 
@@ -100,9 +108,6 @@ def body(args):
         "stopping_criterion_global_acc": args.stopping_criterion_global_acc,
         "which_local_sampler": args.which_local_sampler
     }        
-
-    if args.use_QM == False:
-        print("Gelukt")
     
     ### POLYNOMIAL SCHEDULER
     if args.use_scheduler:
@@ -250,6 +255,10 @@ def body(args):
             'trigger_time':  config["trigger_time"]   # trigger time
             }
         # Get the true parameter values for the plots
+        if args.waveform_approximant == "TaylorF2":
+            del true_param["a_1"]
+            del true_param["a_2"]
+            del true_param["f_stop"]
         truths = copy.deepcopy(true_param)
         truths["eta"] = q
         if args.use_f_stop is False:
@@ -257,6 +266,7 @@ def body(args):
         if args.use_QM is False:
             truths["a_1"] = 0
             truths["a_2"] = 0
+
         #truths = np.fromiter(truths.values(), dtype=float)
         
         # Setup interferometers
@@ -377,6 +387,17 @@ def body(args):
             dL_prior,
             tc_prior,
     ]
+    if args.waveform_approximant == "TaylorF2":
+        prior_list = [
+            Mc_prior,
+            q_prior,
+            s1z_prior,
+            s2z_prior,
+            lambda_1_prior,
+            lambda_2_prior,
+            dL_prior,
+            tc_prior,
+    ]
 
     # Only include phase_c in prior if NOT marginalizing over phase
     if not args.marginalize_phase:
@@ -434,7 +455,7 @@ def body(args):
     # Define transforms
     sample_transforms = []
     likelihood_transforms = [MassRatioToSymmetricMassRatioTransform, CompactnessToStoppingFrequencyTransform()]
-
+ 
     # Create jim object with new API
     jim = Jim(
         likelihood,
