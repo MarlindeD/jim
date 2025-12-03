@@ -27,14 +27,6 @@ import utils
 
 import optax
 
-# from blackjax_ns import (
-#     run_blackjax_ns_gw,
-#     setup_sample_transforms,
-#     create_logprior_fn,
-#     create_loglikelihood_fn,
-#     create_unit_cube_stepper
-# )
-
 # Names of the parameters and their ranges for sampling parameters for the injection
 NAMING = ['M_c', 'q', 's1_z', 's2_z', 'lambda_1', 'lambda_2', 'C_1', 'C_2', 'a_1', 'a_2', 'd_L', 't_c', 'phase_c', 'cos_iota', 'psi', 'ra', 'sin_dec']
 
@@ -49,7 +41,7 @@ PRIOR = {
         "C_2": [0.01, 0.5],
         "a_1": [0, 10],
         "a_2": [0, 10],
-        "d_L": [30.0, 300.0], 
+        "d_L": [300.0, 400.0], 
         "t_c": [-0.1, 0.1], 
         "phase_c": [0.0, 2 * jnp.pi], 
         "cos_iota": [-1.0, 1.0], 
@@ -66,6 +58,9 @@ def body(args):
     
     start_time = time.time()
     naming = NAMING
+    if args.waveform_approximant == "TaylorF2":
+        naming = ['M_c', 'q', 's1_z', 's2_z', 'lambda_1', 'lambda_2', 'd_L', 't_c', 'phase_c', 'cos_iota', 'psi', 'ra', 'sin_dec']
+
 
     # Build hyperparameters from argparse arguments
     # Hyperparameters are verified to match the Jim API (see jim.py line 28-57)
