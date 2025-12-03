@@ -660,6 +660,7 @@ class HeterodynedTransientLikelihoodFD(BaseTransientLikelihoodFD):
 
         # Vectorized computation of frequency shifts
         f_bins_center_broadcast = f_bins_center[:, None]  # Shape: (len(f_bins)-1, 1)
+        freqs_broadcast = freqs_broadcast[: f_bins_center.shape[0]] #QUICK FIX
         freq_shift_matrix = (
             freqs_broadcast - f_bins_center_broadcast
         ) * mask  # Shape: (len(f_bins)-1, n_freqs)
