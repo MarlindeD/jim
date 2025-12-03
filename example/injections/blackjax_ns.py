@@ -51,13 +51,15 @@ def run_blackjax_ns_gw(config, args):
     unit_cube_stepper = config['unit_cube_stepper']
     
     # Configure nested sampler
-    n_live = args['n_live']
+    #n_live = args['n_live']
+    n_live = args.n_live
     n_delete = int(n_live * 0.5)
     
     print(f"Configuration: {n_live} live points, batch size {n_delete}")
     print("Termination condition: dlogZ < 0.1")
     
-    rng_key = jax.random.PRNGKey(args.seed)
+    #rng_key = jax.random.PRNGKey(args.seed)
+    rng_key = jax.random.PRNGKey(args.seed if args.seed is not None else 42)
     rng_key, subkey = jax.random.split(rng_key)
     
     initial_position = prior.sample(subkey, n_live)
@@ -80,7 +82,9 @@ def run_blackjax_ns_gw(config, args):
     
     def terminate(state):
         """Termination condition: stop when remaining evidence is small."""
-        dlogz = jnp.logaddexp(0, state.logZ_live - state.logZ)
+        #dlogz = jnp.logaddexp(0, state.logZ_live - state.logZ)
+        dlogz = float(jnp.logaddexp(0, state.logZ_live - state.logZ))
+        print(f"dlogZ = {dlogz}", flush=True)
         return jnp.isfinite(dlogz) and dlogz < 0.1
     
     step_fn = jax.jit(nested_sampler.step)

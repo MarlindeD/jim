@@ -23,6 +23,6 @@ nvidia-smi --query-gpu=name --format=csv,noheader
 
 # Run the script
 python injection_recovery.py \
-    --waveform-approximant TaylorF2 \
-    --N 15 \
-
+    --waveform-approximant TaylorF2QM_taper \
+    --N 6 \
+    --sampler blackjax-ns \

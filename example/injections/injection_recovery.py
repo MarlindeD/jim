@@ -27,13 +27,13 @@ import utils
 
 import optax
 
-# from blackjax_ns import (
-#     run_blackjax_ns_gw,
-#     setup_sample_transforms,
-#     create_logprior_fn,
-#     create_loglikelihood_fn,
-#     create_unit_cube_stepper
-# )
+from blackjax_ns import (
+    run_blackjax_ns_gw,
+    setup_sample_transforms,
+    create_logprior_fn,
+    create_loglikelihood_fn,
+    create_unit_cube_stepper
+)
 
 # Names of the parameters and their ranges for sampling parameters for the injection
 NAMING = ['M_c', 'q', 's1_z', 's2_z', 'lambda_1', 'lambda_2', 'C_1', 'C_2', 'a_1', 'a_2', 'd_L', 't_c', 'phase_c', 'cos_iota', 'psi', 'ra', 'sin_dec']
@@ -220,7 +220,8 @@ def body(args):
         
         # Start injections
         print("Injecting signals . . .")
-        waveform = ripple_waveform_fn(f_ref=config["fref"])
+        #waveform = ripple_waveform_fn(f_ref=config["fref"])
+        config['waveform'] = ripple_waveform_fn(f_ref=config["fref"])
 
         # convert injected mass ratio to eta, and apply arccos and arcsin
         q = config["q"]
@@ -299,7 +300,7 @@ def body(args):
                 duration=config["duration"],
                 sampling_frequency=config["f_sampling"],
                 epoch=epoch,
-                waveform_model=waveform,
+                waveform_model=config["waveform"],
                 parameters=true_param,
                 rng_key=subkey
             )
@@ -413,7 +414,8 @@ def body(args):
             sin_dec_prior,
     ])
 
-    complete_prior = CombinePrior(prior_list)
+    #complete_prior = CombinePrior(prior_list)
+    config['prior'] = CombinePrior(prior_list)
 
     # Save the prior bounds
     print("Saving prior bounds")
@@ -438,9 +440,11 @@ def body(args):
         print("Using standard heterodyned likelihood")
 
     # Use the fmin and fmax defined at the top of the script
-    likelihood = likelihood_class(
+    #likelihood = likelihood_class(
+    config["likelihood transforms"] = [MassRatioToSymmetricMassRatioTransform, CompactnessToStoppingFrequencyTransform()]
+    config["likelihood"] = likelihood_class(
         ifos,
-        waveform=waveform,
+        waveform=config['waveform'],
         trigger_time=config["trigger_time"],
         f_min=fmin,
         f_max=fmax,
@@ -450,18 +454,82 @@ def body(args):
         )
     
     # Save the ref params
-    utils.save_relative_binning_ref_params(likelihood, outdir)
+    utils.save_relative_binning_ref_params(config["likelihood"], outdir)
 
     # Define transforms
     sample_transforms = []
-    likelihood_transforms = [MassRatioToSymmetricMassRatioTransform, CompactnessToStoppingFrequencyTransform()]
+    config["sample transforms"] = sample_transforms
  
+    # # Create jim object with new API
+    # jim = Jim(
+    #     likelihood,
+    #     complete_prior,
+    #     sample_transforms=sample_transforms,
+    #     likelihood_transforms=likelihood_transforms,
+    #     n_chains=hyperparameters["n_chains"],
+    #     n_local_steps=hyperparameters["n_local_steps"],
+    #     n_global_steps=hyperparameters["n_global_steps"],
+    #     n_training_loops=hyperparameters["n_loop_training"],
+    #     n_production_loops=hyperparameters["n_loop_production"],
+    #     n_epochs=hyperparameters["n_epochs"],
+    #     mala_step_size=args.eps_mass_matrix,
+    #     rq_spline_hidden_units=hyperparameters["hidden_size"],
+    #     rq_spline_n_bins=hyperparameters["num_bins"],
+    #     rq_spline_n_layers=hyperparameters["num_layers"],
+    #     learning_rate=hyperparameters["learning_rate"],
+    #     batch_size=hyperparameters["batch_size"],
+    #     n_max_examples=hyperparameters["max_samples"],
+    #     verbose=hyperparameters["verbose"],
+    # )
+    
+    # # Start the sampling
+    # jim.sample()
+
+    # This is a very inelegant implementation of mine, but it's a quick one
+    if args.sampler == 'flowMC':
+        print("SAMPLER: Running flowMC sampler")
+        run_flowMC(config, args)
+
+    elif args.sampler == 'blackjax-ns':
+        # Setup transforms and functions for blackjax_ns
+        print("SAMPLER: Setting up blackjax_ns sampler")
+        config['sample_transforms'] = setup_sample_transforms(config['prior'].base_prior, ifos=ifos, phase_marginalization=args.marginalize_phase)
+        config['logprior_fn'] = create_logprior_fn(config['prior'], config['sample_transforms'])
+        config['loglikelihood_fn'] = create_loglikelihood_fn(config['likelihood'], config['sample_transforms'], config['likelihood transforms'])
+        config['unit_cube_stepper'] = create_unit_cube_stepper(config['prior'], config['sample_transforms'])
+
+        print("SAMPLER: Running blackjax_ns sampler")
+        samples_df = run_blackjax_ns_gw(config, args)
+
+        # Save samples
+        print("Saving blackjax_ns samples")
+        samples_df.to_csv(config['outdir'] + 'blackjax_ns_samples.csv', index=False)
+
+        # Add anything else you want to save from blackjax_ns here. The run_blackjax_ns_gw function will likely need to be modified to return more data.
+
+    else: 
+        print(f"Sampler {args['sampler']} not recognized. Supported samplers are 'flowMC' and 'blackjax_ns'.")
+        return
+    
+    end_time = time.time()
+    runtime = end_time - start_time
+    print(f"Time taken: {runtime} seconds ({(runtime)/60} minutes)")
+    
+    print(f"Saving runtime")
+    with open(outdir + 'runtime.txt', 'w') as file:
+        file.write(str(runtime))
+    
+    print("Finished injection recovery successfully!")
+
+
+def run_flowMC(config, args):
+    hyperparameters = config['hyperparameters']
     # Create jim object with new API
     jim = Jim(
-        likelihood,
-        complete_prior,
-        sample_transforms=sample_transforms,
-        likelihood_transforms=likelihood_transforms,
+        config['likelihood'],
+        config['prior'],
+        sample_transforms=config['sample_transforms'],
+        likelihood_transforms=config['likelihood_transforms'],
         n_chains=hyperparameters["n_chains"],
         n_local_steps=hyperparameters["n_local_steps"],
         n_global_steps=hyperparameters["n_global_steps"],
@@ -477,9 +545,6 @@ def body(args):
         n_max_examples=hyperparameters["max_samples"],
         verbose=hyperparameters["verbose"],
     )
-    
-    # Start the sampling
-    jim.sample()
         
     # === Show results, save output ===
 
