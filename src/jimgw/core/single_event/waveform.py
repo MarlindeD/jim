@@ -159,6 +159,8 @@ class RippleTaylorF2QM_taper(Waveform):
                 first_lambda_param,
                 second_lambda_param,
                 params["f_stop"],
+                params["a_1"],
+                params["a_2"],
                 params["d_L"],
                 0,
                 params["phase_c"],
