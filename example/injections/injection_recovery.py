@@ -41,7 +41,7 @@ PRIOR = {
         "C_2": [0.01, 0.5],
         "a_1": [0, 10],
         "a_2": [0, 10],
-        "d_L": [300.0, 400.0], 
+        "d_L": [100.0, 150.0], 
         "t_c": [-0.1, 0.1], 
         "phase_c": [0.0, 2 * jnp.pi], 
         "cos_iota": [-1.0, 1.0], 
@@ -58,8 +58,6 @@ def body(args):
     
     start_time = time.time()
     naming = NAMING
-    if args.waveform_approximant == "TaylorF2":
-        naming = ['M_c', 'q', 's1_z', 's2_z', 'lambda_1', 'lambda_2', 'd_L', 't_c', 'phase_c', 'cos_iota', 'psi', 'ra', 'sin_dec']
 
 
     # Build hyperparameters from argparse arguments
@@ -225,9 +223,7 @@ def body(args):
         # Setup the timing setting for the injection
         epoch = config["duration"] - config["post_trigger_duration"]
         gmst = Time(config["trigger_time"], format='gps').sidereal_time('apparent', 'greenwich').rad
-        #Convert compactness to stopping frequency
-        m1, m2 = M_q_to_m1_m2(config['M_c'], config['q'])
-        f_stop = C1_C2_to_f_stop(config['C_1'], config["C_2"], m1, m2)
+
         # Array of injection parameters
         true_param = {
             'M_c':           config["M_c"],           # chirp mass
@@ -236,9 +232,6 @@ def body(args):
             's2_z':          config["s2_z"],          # aligned spin of secondary component s2_z.
             'lambda_1':      config["lambda_1"],      # tidal deformability of priminary component lambda_1.
             'lambda_2':      config["lambda_2"],      # tidal deformability of secondary component lambda_2.
-            'f_stop':        f_stop,                  # stopping frequency
-            'a_1':           config["a_1"],           # QM parameter of the primary component
-            'a_2':           config["a_2"],           # QM parameter of the secondary component
             'd_L':           config["d_L"],           # luminosity distance
             't_c':           config["t_c"],           # timeshift w.r.t. trigger time
             'phase_c':       config["phase_c"],       # merging phase
@@ -250,18 +243,43 @@ def body(args):
             'trigger_time':  config["trigger_time"]   # trigger time
             }
         # Get the true parameter values for the plots
-        if args.waveform_approximant == "TaylorF2":
-            del true_param["a_1"]
-            del true_param["a_2"]
-            del true_param["f_stop"]
+        
+        if args.waveform_approximant == "TaylorF2QM_taper":
+            #Convert compactness to stopping frequency
+            m1, m2 = M_q_to_m1_m2(config['M_c'], config['q'])
+            f_stop = C1_C2_to_f_stop(config['C_1'], config["C_2"], m1, m2)
+
+            true_param = {
+                'M_c':           config["M_c"],           # chirp mass
+                'eta':           eta,                     # symmetric mass ratio 0 < eta <= 0.25
+                's1_z':          config["s1_z"],          # aligned spin of priminary component s1_z.
+                's2_z':          config["s2_z"],          # aligned spin of secondary component s2_z.
+                'lambda_1':      config["lambda_1"],      # tidal deformability of priminary component lambda_1.
+                'lambda_2':      config["lambda_2"],      # tidal deformability of secondary component lambda_2.
+                'f_stop':        f_stop,                  # stopping frequency
+                'a_1':           config["a_1"],           # QM parameter of the primary component
+                'a_2':           config["a_2"],           # QM parameter of the
+                'd_L':           config["d_L"],           # luminosity distance
+                't_c':           config["t_c"],           # timeshift w.r.t. trigger time
+                'phase_c':       config["phase_c"],       # merging phase
+                'iota':          iota,                    # inclination angle
+                'psi':           config["psi"],           # polarization angle
+                'ra':            config["ra"],            # right ascension
+                'dec':           dec,                     # declination
+                'gmst':          gmst,                    # Greenwich mean sidereal time
+                'trigger_time':  config["trigger_time"]   # trigger time
+            }
+
+            if args.use_f_stop is False:
+                true_param["f_stop"] = 3000 #Set to a value above LVK max frequency value
+            if args.use_QM is False:
+                true_param["a_1"] = 0
+                true_param["a_2"] = 0
+
+
         truths = copy.deepcopy(true_param)
         truths["eta"] = q
-        if args.use_f_stop is False:
-            truths["f_stop"] = 3000 #Set to a value above LVK max frequency value
-        if args.use_QM is False:
-            truths["a_1"] = 0
-            truths["a_2"] = 0
-
+       
         #truths = np.fromiter(truths.values(), dtype=float)
         
         # Setup interferometers
@@ -396,6 +414,7 @@ def body(args):
 
     # Only include phase_c in prior if NOT marginalizing over phase
     if not args.marginalize_phase:
+        #TODO fix for TaylorF2
         phic_prior = UniformPrior(prior_low_float[12], prior_high_float[12], parameter_names=['phase_c'])
         prior_list.append(phic_prior)
     else:
@@ -450,7 +469,9 @@ def body(args):
     # Define transforms
     sample_transforms = []
     likelihood_transforms = [MassRatioToSymmetricMassRatioTransform, CompactnessToStoppingFrequencyTransform()]
- 
+    if args.waveform_approximant == "TaylorF2":
+        likelihood_transforms = [MassRatioToSymmetricMassRatioTransform]
+
     # Create jim object with new API
     jim = Jim(
         likelihood,
@@ -523,7 +544,11 @@ def body(args):
         utils.plot_log_prob(log_prob, "Log probability (production)", "log_prob_production", outdir)
 
     # Plot the chains as corner plots
-    utils.plot_chains(chains, "chains_production", outdir, truths = truths)
+    if args.waveform_approximant == "TaylorF2QM_taper":
+        utils.plot_chains_TF2QMtaper(chains, "chains_production", outdir, truths = truths)
+    else:
+        print("Chain shape:", chains.shape)
+        utils.plot_chains(chains, "chains_production", outdir, truths = truths)
     
     # Finally, copy over this script to the outdir for reproducibility
     shutil.copy2(__file__, outdir + "copy_injection_recovery.py")

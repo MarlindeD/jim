@@ -49,7 +49,8 @@ matplotlib_params = {"axes.grid": True,
 
 plt.rcParams.update(matplotlib_params)
 
-labels = [r'$M_c/M_\odot$', r'$q$', r'$\chi_1$', r'$\chi_2$', r'$\Lambda$', r'$\delta\Lambda$', r"$C_1$", r"$C_2$", r"$a_1$", r"$a_2$", r'$d_{\rm{L}}/{\rm Mpc}$', r'$t_c$', r'$\phi_c$', r'$\iota$', r'$\psi$', r'$\alpha$', r'$\delta$']
+labels = [r'$M_c/M_\odot$', r'$q$', r'$\chi_1$', r'$\chi_2$', r'$\Lambda$', r'$\delta\Lambda$', r'$d_{\rm{L}}/{\rm Mpc}$', r'$t_c$', r'$\phi_c$', r'$\iota$', r'$\psi$', r'$\alpha$', r'$\delta$']
+labels_QM = [r'$M_c/M_\odot$', r'$q$', r'$\chi_1$', r'$\chi_2$', r'$\Lambda$', r'$\delta\Lambda$', r"$C_1$", r"$C_2$", r"$a_1$", r"$a_2$", r'$d_{\rm{L}}/{\rm Mpc}$', r'$t_c$', r'$\phi_c$', r'$\iota$', r'$\psi$', r'$\alpha$', r'$\delta$']
 
 ############################################
 ### Injection recovery utility functions ###
@@ -117,8 +118,59 @@ def plot_log_prob(log_prob, label, name, outdir):
     plt.savefig(f"{outdir}{name}.png", bbox_inches='tight')  
     plt.close()
 
-    
 def plot_chains(chains, name, outdir, truths = None, labels = labels):
+    chains = np.array(chains)
+
+    # Infer the number of parameters from the chains
+    if len(np.shape(chains)) == 3:
+        n_params = chains.shape[-1]
+        chains = chains.reshape(-1, n_params)
+    else:
+        n_params = chains.shape[-1]
+
+    idxphi = labels.index(r'$\phi_c$') #Index of phi_c
+    # Ensure labels match the number of parameters
+    if len(labels) != n_params:
+        # Use only the first n_params labels or pad if needed
+        if len(labels) > n_params:
+            if r'$\phi_c$' in labels:
+                #idx = labels_to_use.index(r'$\phi_c$')
+                #chains = np.delete(chains, idx, 1)
+                labels_to_use = labels
+                labels_to_use.remove(r'$\phi_c$')
+                
+            labels_to_use = labels[:n_params]
+        else:
+            labels_to_use = labels + [f'param_{i}' for i in range(len(labels), n_params)]
+    else:
+        labels_to_use = labels
+
+    # Find index of cos iota and sin dec if they exist
+    if r'$\iota$' in labels_to_use:
+        idx = labels_to_use.index(r'$\iota$')
+        chains[:, idx] = np.arccos(np.clip(chains[:, idx], -1, 1))
+
+    if r'$\delta$' in labels_to_use:
+        idx = labels_to_use.index(r'$\delta$')
+        chains[:, idx] = np.arcsin(np.clip(chains[:, idx], -1, 1))
+
+    chains = np.asarray(chains)
+    #Get rid of truths for which we have no chains
+    print(truths)
+    if truths is not None:
+        #No chains for phi_c -> TO DO: this is not always the case, check when to plot and when not to plot
+        del truths['phase_c']
+        #No chains for gmst and trigger_time
+        del truths["gmst"]
+        del truths["trigger_time"]
+        truths = np.fromiter(truths.values(), dtype=float)
+    print(len(labels_to_use))
+    print(len(truths) if truths is not None else "No truths")
+
+    fig = corner.corner(chains, labels = labels_to_use, truths = truths, hist_kwargs={'density': True}, **default_corner_kwargs)
+    fig.savefig(f"{outdir}{name}.png", bbox_inches='tight') 
+
+def plot_chains_TF2QMtaper(chains, name, outdir, truths = None, labels = labels_QM):
 
     chains = np.array(chains)
 
