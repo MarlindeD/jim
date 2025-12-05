@@ -272,6 +272,7 @@ def body(args):
 
             if args.use_f_stop is False:
                 true_param["f_stop"] = 3000 #Set to a value above LVK max frequency value
+                true_param["f_stop"] = C1_C2_to_f_stop(2, 2, m1, m2)
             if args.use_QM is False:
                 true_param["a_1"] = 0
                 true_param["a_2"] = 0
@@ -370,8 +371,8 @@ def body(args):
         C1_prior       = UniformPrior(prior_low_float[6], prior_high_float[6], parameter_names=["C_1"])
         C2_prior       = UniformPrior(prior_low_float[7], prior_high_float[7], parameter_names=["C_2"])
     else:
-        C1_prior       = UniformPrior(1., 1., parameter_names=["C_1"])
-        C2_prior       = UniformPrior(1., 1., parameter_names=["C_2"])
+        C1_prior       = UniformPrior(2., 2., parameter_names=["C_1"])
+        C2_prior       = UniformPrior(2., 2., parameter_names=["C_2"])
     if args.use_QM:
         a1_prior       = UniformPrior(prior_low_float[8], prior_high_float[8], parameter_names=['a_1'])
         a2_prior       = UniformPrior(prior_low_float[9], prior_high_float[9], parameter_names=['a_2'])
