@@ -523,7 +523,7 @@ class CompactnessToStoppingFrequencyTransform(ConditionalBijectiveTransform):
 
     def __init__(self):
         name_mapping = (["C_1", "C_2"], ["f_stop"])
-        conditional_names = ["M_c", "q"]
+        conditional_names = ["M_c", "eta"]
         super().__init__(name_mapping, conditional_names)
 
         def named_transform(x):
