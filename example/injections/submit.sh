@@ -6,7 +6,7 @@
 #SBATCH -t 01:00:00
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-gpu=1
-#SBATCH --mem-per-gpu=128G
+#SBATCH --mem-per-gpu=10G
 #SBATCH --output="log.out"
 #SBATCH --job-name="test_injection"
 
@@ -24,7 +24,7 @@ nvidia-smi --query-gpu=name --format=csv,noheader
 # Run the script
 python injection_recovery.py \
     --waveform-approximant TaylorF2QM_taper \
-    --N 9 \
+    --N 12 \
     --n-chains 200 \
     --n-local-steps 100 \
     --n-global-steps 1000 \

@@ -367,18 +367,20 @@ def body(args):
     s2z_prior      = UniformPrior(prior_low_float[3], prior_high_float[3], parameter_names=['s2_z'])
     lambda_1_prior = UniformPrior(prior_low_float[4], prior_high_float[4], parameter_names=['lambda_1'])
     lambda_2_prior = UniformPrior(prior_low_float[5], prior_high_float[5], parameter_names=['lambda_2'])
+    # Note: Only include parameters in the prior if they are being sampled
+    # Fixed parameters will be set directly in the likelihood via fixed_parameters
+    C1_prior = None
+    C2_prior = None
+    a1_prior = None
+    a2_prior = None
+    
     if args.use_f_stop:
         C1_prior       = UniformPrior(prior_low_float[6], prior_high_float[6], parameter_names=["C_1"])
         C2_prior       = UniformPrior(prior_low_float[7], prior_high_float[7], parameter_names=["C_2"])
-    else:
-        C1_prior       = UniformPrior(2., 2., parameter_names=["C_1"])
-        C2_prior       = UniformPrior(2., 2., parameter_names=["C_2"])
+    
     if args.use_QM:
         a1_prior       = UniformPrior(prior_low_float[8], prior_high_float[8], parameter_names=['a_1'])
         a2_prior       = UniformPrior(prior_low_float[9], prior_high_float[9], parameter_names=['a_2'])
-    else:
-        a1_prior       = UniformPrior(0., 0., parameter_names=['a_1'])
-        a2_prior       = UniformPrior(0., 0., parameter_names=['a_2'])
     dL_prior       = UniformPrior(prior_low_float[10], prior_high_float[10], parameter_names=['d_L'])
     tc_prior       = UniformPrior(prior_low_float[11], prior_high_float[11], parameter_names=['t_c'])
     cos_iota_prior = CosinePrior(parameter_names=["iota"])
@@ -386,21 +388,7 @@ def body(args):
     ra_prior       = UniformPrior(prior_low_float[15], prior_high_float[15], parameter_names=["ra"])
     sin_dec_prior  = SinePrior(parameter_names=["dec"])
 
-    # Compose the prior - conditionally include phase_c based on marginalization setting
-    prior_list = [
-            Mc_prior,
-            q_prior,
-            s1z_prior,
-            s2z_prior,
-            lambda_1_prior,
-            lambda_2_prior,
-            C1_prior,
-            C2_prior,
-            a1_prior,
-            a2_prior,
-            dL_prior,
-            tc_prior,
-    ]
+    # Compose the prior - conditionally include parameters based on waveform and settings
     if args.waveform_approximant == "TaylorF2":
         prior_list = [
             Mc_prior,
@@ -411,7 +399,29 @@ def body(args):
             lambda_2_prior,
             dL_prior,
             tc_prior,
-    ]
+        ]
+    else:  # TaylorF2QM_taper
+        prior_list = [
+            Mc_prior,
+            q_prior,
+            s1z_prior,
+            s2z_prior,
+            lambda_1_prior,
+            lambda_2_prior,
+        ]
+        # Only include C_1, C_2 if they are being sampled
+        if C1_prior is not None:
+            prior_list.append(C1_prior)
+        if C2_prior is not None:
+            prior_list.append(C2_prior)
+        
+        # Only include a_1, a_2 if they are being sampled
+        if a1_prior is not None:
+            prior_list.append(a1_prior)
+        if a2_prior is not None:
+            prior_list.append(a2_prior)
+        
+        prior_list.extend([dL_prior, tc_prior])
 
     # Only include phase_c in prior if NOT marginalizing over phase
     if not args.marginalize_phase:
@@ -452,6 +462,19 @@ def body(args):
         likelihood_class = HeterodynedTransientLikelihoodFD
         print("Using standard heterodyned likelihood")
 
+    # Set up fixed parameters for the likelihood
+    fixed_parameters = {}
+    if args.waveform_approximant == "TaylorF2QM_taper":
+        if not args.use_f_stop:
+            # When f_stop is disabled, set it as a fixed parameter
+            fixed_parameters["f_stop"] = true_param["f_stop"]
+            print(f"Fixed f_stop to {fixed_parameters['f_stop']:.2f} Hz (f_stop disabled)")
+        if not args.use_QM:
+            # When QM is disabled, set a_1 and a_2 as fixed parameters
+            fixed_parameters["a_1"] = 0.0
+            fixed_parameters["a_2"] = 0.0
+            print(f"Fixed a_1 and a_2 to 0.0 (QM disabled)")
+
     # Use the fmin and fmax defined at the top of the script
     likelihood = likelihood_class(
         ifos,
@@ -462,6 +485,7 @@ def body(args):
         n_bins=args.relative_binning_binsize,
         ref_params=ref_params,
         prior=complete_prior if not ref_params else None,
+        fixed_parameters=fixed_parameters,
         )
     
     # Save the ref params
@@ -469,9 +493,11 @@ def body(args):
 
     # Define transforms
     sample_transforms = []
-    likelihood_transforms = [MassRatioToSymmetricMassRatioTransform, CompactnessToStoppingFrequencyTransform()]
-    if args.waveform_approximant == "TaylorF2":
-        likelihood_transforms = [MassRatioToSymmetricMassRatioTransform]
+    likelihood_transforms = [MassRatioToSymmetricMassRatioTransform]
+    
+    # Only include CompactnessToStoppingFrequencyTransform if f_stop is being sampled
+    if args.waveform_approximant == "TaylorF2QM_taper" and args.use_f_stop:
+        likelihood_transforms.append(CompactnessToStoppingFrequencyTransform())
 
     # Create jim object with new API
     jim = Jim(
@@ -546,10 +572,10 @@ def body(args):
 
     # Plot the chains as corner plots
     if args.waveform_approximant == "TaylorF2QM_taper":
-        utils.plot_chains_TF2QMtaper(chains, "chains_production", outdir, truths = truths)
+        utils.plot_chains_TF2QMtaper(chains, "chains_production", outdir, truths=truths, use_f_stop=args.use_f_stop, use_QM=args.use_QM)
     else:
         print("Chain shape:", chains.shape)
-        utils.plot_chains(chains, "chains_production", outdir, truths = truths)
+        utils.plot_chains(chains, "chains_production", outdir, truths=truths)
     
     # Finally, copy over this script to the outdir for reproducibility
     shutil.copy2(__file__, outdir + "copy_injection_recovery.py")
