@@ -170,169 +170,150 @@ def plot_chains(chains, name, outdir, truths = None, labels = labels):
     fig = corner.corner(chains, labels = labels_to_use, truths = truths, hist_kwargs={'density': True}, **default_corner_kwargs)
     fig.savefig(f"{outdir}{name}.png", bbox_inches='tight') 
 
-def plot_chains_TF2QMtaper(chains, name, outdir, truths=None, labels=labels_QM, use_f_stop=True, use_QM=True):
 
+def plot_chains_TF2QMtaper(
+    chains, name, outdir,
+    truths=None, labels=labels_QM,
+    use_f_stop=True, use_QM=True
+):
+    """
+    Load, clean, convert, filter, and plot MCMC chains for TF2QM taper model.
+    Fully robust against dynamic-range removal and label/truth mismatches.
+    """
+
+    # -----------------------------------------------------
+    # Load chains
+    # -----------------------------------------------------
     chains = np.array(chains)
 
-    # Infer the number of parameters from the chains
-    if len(np.shape(chains)) == 3:
-        n_params = chains.shape[-1]
-        chains = chains.reshape(-1, n_params)
-    else:
-        n_params = chains.shape[-1]
+    # Flatten if needed
+    if chains.ndim == 3:
+        chains = chains.reshape(-1, chains.shape[-1])
 
-    # Start with labels_QM and remove phase_c (it's marginalized)
-    labels_to_use = [label for label in labels if label != r'$\phi_c$']
+    n_params = chains.shape[-1]
+
+    # -----------------------------------------------------
+    # Remove QM and f_stop parameters based on flags
+    # -----------------------------------------------------
+    # Copy labels so we don't mutate the global one
+    labels_to_use = [l for l in labels if l != r'$\phi_c$']
     
-    # Remove C_1 and C_2 if use_f_stop is False
     if not use_f_stop:
-        if r"$C_1$" in labels_to_use:
-            labels_to_use.remove(r"$C_1$")
-        if r"$C_2$" in labels_to_use:
-            labels_to_use.remove(r"$C_2$")
-    
-    # Remove a_1 and a_2 if use_QM is False
-    if not use_QM:
-        if r"$a_1$" in labels_to_use:
-            labels_to_use.remove(r"$a_1$")
-        if r"$a_2$" in labels_to_use:
-            labels_to_use.remove(r"$a_2$")
-    
-    # Verify the number of labels matches chains
-    if len(labels_to_use) != n_params:
-        # Track which indices to remove from chains (in reverse order to avoid index shifting)
-        indices_to_remove = []
-        
-        # Remove C_1 and C_2 if use_f_stop is False
-        if not use_f_stop:
-            if r"$C_1$" in labels_to_use:
-                indices_to_remove.append(labels_to_use.index(r"$C_1$"))
-            if r"$C_2$" in labels_to_use:
-                indices_to_remove.append(labels_to_use.index(r"$C_2$"))
-        
-        # Remove a_1 and a_2 if use_QM is False
-        if not use_QM:
-            if r"$a_1$" in labels_to_use:
-                indices_to_remove.append(labels_to_use.index(r"$a_1$"))
-            if r"$a_2$" in labels_to_use:
-                indices_to_remove.append(labels_to_use.index(r"$a_2$"))
-        
-        # Remove these columns from chains (in reverse order to avoid index shifting)
-        for idx in sorted(set(indices_to_remove), reverse=True):
-            chains = np.delete(chains, idx, axis=1)
-            labels_to_use.pop(idx)
+        for key in (r"$C_1$", r"$C_2$"):
+            if key in labels_to_use:
+                labels_to_use.remove(key)
 
-    # Find index of cos iota and sin dec if they exist
+    if not use_QM:
+        for key in (r"$a_1$", r"$a_2$"):
+            if key in labels_to_use:
+                labels_to_use.remove(key)
+
+    # -----------------------------------------------------
+    # Angle conversions
+    # -----------------------------------------------------
     if r'$\iota$' in labels_to_use:
-        idx = labels_to_use.index(r'$\iota$')
-        chains[:, idx] = np.arccos(np.clip(chains[:, idx], -1, 1))
+        i = labels_to_use.index(r'$\iota$')
+        chains[:, i] = np.degrees(np.arccos(np.clip(chains[:, i], -1, 1)))
 
     if r'$\delta$' in labels_to_use:
-        idx = labels_to_use.index(r'$\delta$')
-        chains[:, idx] = np.arcsin(np.clip(chains[:, idx], -1, 1))
-    
-    # Convert C_1 and C_2 to f_stop if they're in the chains
-    if use_f_stop and r"$C_1$" in labels_to_use and r"$C_2$" in labels_to_use:
-        idxC1 = labels_to_use.index(r"$C_1$")
-        idxC2 = labels_to_use.index(r"$C_2$")
-        idxMc = labels_to_use.index(r'$M_c/M_\odot$')
-        idxq = labels_to_use.index(r'$q$')
-        
-        m1, m2 = Mc_q_to_m1_m2(chains[:, idxMc], chains[:, idxq]) 
-        f_stop = C1_C2_to_f_stop(chains[:, idxC1], chains[:, idxC2], m1, m2)
-        #Replace C1 by f_stop and remove C2 from the chains...
-        chains[:, idxC1] = f_stop
-        chains = np.delete(chains, idxC2, 1)
-        #... and the labels
-        labels_to_use[idxC1] = r"f_{stop}"
-        labels_to_use.remove(r"$C_2$")
+        i = labels_to_use.index(r'$\delta$')
+        chains[:, i] = np.degrees(np.arcsin(np.clip(chains[:, i], -1, 1)))
 
-    chains = np.asarray(chains)
+    # -----------------------------------------------------
+    # Convert C1,C2 → f_stop
+    # -----------------------------------------------------
+    if (
+        use_f_stop
+        and r"$C_1$" in labels_to_use
+        and r"$C_2$" in labels_to_use
+    ):
+        iC1 = labels_to_use.index(r"$C_1$")
+        iC2 = labels_to_use.index(r"$C_2$")
+        iMc = labels_to_use.index(r'$M_c/M_\odot$')
+        iq  = labels_to_use.index(r'$q$')
 
-    # Build a truths array aligned with the chains if possible
+        m1, m2 = Mc_q_to_m1_m2(chains[:, iMc], chains[:, iq])
+        f_stop = C1_C2_to_f_stop(chains[:, iC1], chains[:, iC2], m1, m2)
+
+        # Replace C1 → f_stop
+        chains[:, iC1] = f_stop
+        labels_to_use[iC1] = r"$f_{\rm stop}$"
+
+        # Remove C2
+        chains = np.delete(chains, iC2, axis=1)
+        labels_to_use.pop(iC2)
+
+    # -----------------------------------------------------
+    # Remove zero–dynamic-range parameters
+    # -----------------------------------------------------
+    if use_QM != True or use_f_stop != True:
+        mask = np.array([np.ptp(chains[:, i]) > 0 for i in range(chains.shape[1])])
+        chains = chains[:, mask]
+        labels_to_use = [l for l, keep in zip(labels_to_use, mask) if keep]
+    else:
+        mask = None
+
+    # -----------------------------------------------------
+    # Build truths array matching final labels
+    # -----------------------------------------------------
     truths_arr = None
+
     if truths is not None:
-        # Accept either dict or array-like truths
+
+        # ----- dictionary-style truths -----
         if isinstance(truths, dict):
-            # Remove keys that never correspond to sampled parameters
-            truths_work = dict(truths)  # copy
-            truths_work.pop('phase_c', None)
-            truths_work.pop('gmst', None)
-            truths_work.pop('trigger_time', None)
-            # If f_stop or QM params weren't sampled, remove them from truths_work
+
+            t = dict(truths)
+
+            # # Convert eta → q if needed
+            # if "eta" in t and "q" not in t:
+            #     eta = float(t["eta"])
+            #     disc = max(0, 1 - 4 * eta)
+            #     q = (1 - 2*eta - np.sqrt(disc)) / (2*eta)
+            #     t["q"] = q
+
+            # Remove irrelevant keys
+            for k in ("gmst", "trigger_time", "phase_c"):
+                t.pop(k, None)
+
             if not use_f_stop:
-                truths_work.pop('C_1', None)
-                truths_work.pop('C_2', None)
-                truths_work.pop('f_stop', None)
+                for k in ('C_1', 'C_2', 'f_stop'):
+                    t.pop(k, None)
+
             if not use_QM:
-                truths_work.pop('a_1', None)
-                truths_work.pop('a_2', None)
+                for k in ('a_1', 'a_2'):
+                    t.pop(k, None)
+            print(t)
+            truths_arr = np.array(list(t.values()))
 
-            # Desired parameter order should match the sampler/prior parameter names
-            desired_order = ['M_c', 'q', 's1_z', 's2_z', 'lambda_1', 'lambda_2', 'd_L', 't_c', 'iota', 'psi', 'ra', 'dec']
-            truth_list = []
-            missing = False
-            for p in desired_order:
-                if p in truths_work:
-                    truth_list.append(truths_work[p])
-                elif p == 'q' and 'eta' in truths_work:
-                    eta_val = truths_work['eta']
-                    # If eta looks like a symmetric mass ratio (<=0.25), convert to q
-                    try:
-                        eta_val = float(eta_val)
-                    except Exception:
-                        missing = True
-                        break
-                    if eta_val <= 0.25:
-                        disc = max(0.0, 1.0 - 4.0 * eta_val)
-                        q_val = (1.0 - 2.0 * eta_val - np.sqrt(disc)) / (2.0 * eta_val)
-                        truth_list.append(q_val)
-                    else:
-                        # eta contains q directly (nonstandard), use it
-                        truth_list.append(eta_val)
-                else:
-                    missing = True
-                    break
-
-            if not missing:
-                truths_arr = np.array(truth_list, dtype=float)
-
+        # ----- array-style truths -----
         else:
-            # If it's already array-like, only accept if dimensions match
-            try:
-                arr = np.asarray(truths, dtype=float)
-                if arr.size == chains.shape[1]:
-                    truths_arr = arr
-            except Exception:
-                truths_arr = None
+            arr = np.asarray(truths, float)
+            if arr.size == len(labels_to_use):
+                truths_arr = arr
 
-    # If truths can't be aligned, set to None to avoid corner dimension errors
-    if truths_arr is None:
-        truths_plot = None
-    else:
-        truths_plot = truths_arr
+   # Apply dynamic-range mask also to truths
+    if truths_arr is not None:
+        if use_QM != True or use_f_stop != True:
+            if mask is not None:
+                truths_arr = np.array([val for val, keep in zip(truths_arr, mask) if keep])
+                print(truths_arr)
 
-    fig = corner.corner(chains, labels=labels_to_use, truths=truths_plot, hist_kwargs={'density': True}, **default_corner_kwargs)
+
+    # -----------------------------------------------------
+    # Plot
+    # -----------------------------------------------------
+    fig = corner.corner(
+        chains,
+        labels=labels_to_use,
+        truths=truths_arr,
+        hist_kwargs={"density": True},
+        **default_corner_kwargs
+    )
+
     fig.savefig(f"{outdir}{name}.png", bbox_inches='tight')
-    
-def plot_chains_from_file(outdir, load_true_params: bool = False):
 
-    filename = outdir + 'results_production.npz'
-    data = np.load(filename)
-    chains = data['chains']
-    my_chains = []
-    n_dim = np.shape(chains)[-1]
-    for i in range(n_dim):
-        values = chains[:, :, i].flatten()
-        my_chains.append(values)
-    my_chains = np.array(my_chains).T
-    chains = chains.reshape(-1, n_dim)
-    if load_true_params:
-        truths = load_true_params_from_config(outdir)
-    else:
-        truths = None
 
-    plot_chains(chains, 'results', outdir, truths=truths)
     
 def plot_accs_from_file(outdir):
     
