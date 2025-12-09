@@ -24,11 +24,5 @@ nvidia-smi --query-gpu=name --format=csv,noheader
 # Run the script
 python injection_recovery.py \
     --waveform-approximant TaylorF2QM_taper \
-    --N 12 \
-    --n-chains 200 \
-    --n-local-steps 100 \
-    --n-global-steps 1000 \
-    --n-loop-training 20 \
-    --n-loop-production 10 \
-    --n-epochs 20 \
-    --batch-size 2000 \
+    --load-existing-config True \
+    --N 1 \
