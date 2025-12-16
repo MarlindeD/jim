@@ -18,6 +18,8 @@ from jimgw.core.single_event.gps_times import (
 import logging
 from typing import Sequence
 from abc import abstractmethod
+from jimgw.core.single_event.utils import L1_L2_to_a1_a2
+
 
 
 class SingleEventLikelihood(LikelihoodBase):
@@ -426,12 +428,19 @@ class HeterodynedTransientLikelihoodFD(BaseTransientLikelihoodFD):
         prior: Optional[Prior] = None,
         sample_transforms: list[BijectiveTransform] = [],
         likelihood_transforms: list[NtoMTransform] = [],
+        use_QM: bool = False,
+        TF2_SSM: bool = False,
+        sample_a: bool = True
     ):
         super().__init__(
             detectors, waveform, fixed_parameters, f_min, f_max, trigger_time
         )
 
         logging.info("Initializing heterodyned likelihood..")
+
+        self.use_QM = use_QM
+        self.TF2_SSM = TF2_SSM
+        self.sample_a = sample_a
 
         # Can use another waveform to use as reference waveform, but if not provided, use the same waveform
         if reference_waveform is None:
@@ -441,6 +450,7 @@ class HeterodynedTransientLikelihoodFD(BaseTransientLikelihoodFD):
             self.ref_params = ref_params.copy()
             logging.info(f"Reference parameters provided, which are {self.ref_params}")
         elif prior:
+            self.prior=prior
             logging.info("No reference parameters are provided, finding it...")
             ref_params = self.maximize_likelihood(
                 prior=prior,
@@ -540,6 +550,14 @@ class HeterodynedTransientLikelihoodFD(BaseTransientLikelihoodFD):
         params["trigger_time"] = self.trigger_time
         params["gmst"] = self.gmst
         params.update(self.fixed_parameters)
+
+        if self.TF2_SSM and self.use_QM:
+            if not self.sample_a:
+                print("Calculate a1 and a2 from tidal deformability")
+                a1, a2 = L1_L2_to_a1_a2(params["lambda_1"], params["lambda_2"])
+                params["a_1"] = a1
+                params["a_2"] = a2
+
         # evaluate the waveforms as usual
         return self._likelihood(params, data)
 

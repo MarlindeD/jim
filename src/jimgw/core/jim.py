@@ -11,6 +11,8 @@ from jimgw.core.base import LikelihoodBase
 from jimgw.core.prior import Prior
 from jimgw.core.transforms import BijectiveTransform, NtoMTransform
 
+from jimgw.core.single_event.utils import C1_C2_to_f_stop, Mc_q_to_m1_m2
+
 
 class Jim(object):
     """
@@ -242,4 +244,13 @@ class Jim(object):
         chains = jax.vmap(self.add_name)(chains)
         for sample_transform in reversed(self.sample_transforms):
             chains = jax.vmap(sample_transform.backward)(chains)
+        
+        #Convert C1 and C2 chains to f_stop if necessary
+        if "C_1" and "C_2" in chains:
+            m1, m2 = Mc_q_to_m1_m2(chains["M_c"], chains["q"])
+            f_stop = C1_C2_to_f_stop(chains["C_1"], chains["C_2"], m1, m2)
+            chains["f_stop"] = f_stop
+            del chains["C_1"]
+            del chains["C_2"]
+
         return chains

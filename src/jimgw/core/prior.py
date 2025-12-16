@@ -379,6 +379,8 @@ class CombinePrior(CompositePrior):
     ) -> dict[str, Float[Array, " n_samples"]]:
         output = {}
         for prior in self.base_prior:
+            if prior is None:
+                continue
             rng_key, subkey = jax.random.split(rng_key)
             output.update(prior.sample(subkey, n_samples))
         return output
@@ -386,9 +388,33 @@ class CombinePrior(CompositePrior):
     def log_prob(self, z: dict[str, Float]) -> Float:
         output = 0.0
         for prior in self.base_prior:
+            if prior is None:
+                continue
             output += prior.log_prob(z)
         return output
+    
+    def remove_parameter(self, name: str):
+        """
+        Return a new CombinePrior with `name` and its prior removed.
+        """
+        new_base_prior = []
+        removed = False
 
+        for prior in self.base_prior:
+            if hasattr(prior, "parameter_names") and name in prior.parameter_names:
+                removed = True
+                continue
+            new_base_prior.append(prior)
+
+        if not removed:
+            raise ValueError(f"No prior found for parameter '{name}'")
+
+        return CombinePrior(new_base_prior)
+    
+    def has_param(prior, name: str) -> bool:
+        return name in prior.parameter_names
+
+       
 
 @jaxtyped(typechecker=typechecker)
 class UniformPrior(SequentialTransformPrior):
