@@ -73,6 +73,44 @@ def C1_C2_to_f_stop(C1, C2, m1: float, m2:float):
     f_ECO = (C1 + C2)**(3/2) * f_ISCO
     return f_ECO
 
+def universal_relation(coeffs: Array, x: float):
+    """Applies the general formula of a universal relationship, which is a quartic polynomial.
+
+    Args:
+        coeffs (Array): Array of coefficients for the quartic polynomial, starting from the constant term and going to the fourth order.
+        x (float): Variable of quartic polynomial
+
+    Returns:
+        float: Result of universal relation
+    """
+    return coeffs[0] + coeffs[1] * x + coeffs[2] * (x ** 2) + coeffs[3] * (x ** 3) + coeffs[4] * (x ** 4)
+
+def _get_spin_induced_quadrupole_phase_coeff_high(L:Float) -> Float:
+    """Compute the quantity from equation (11) from http://arxiv.org/abs/1503.05405
+
+    Args:
+        L (float): Tidal deformability of object
+        mass (float): Mass of object in solar masses
+
+    Returns:
+        float: a(m) as defined in equation (11) of http://arxiv.org/abs/1503.05405
+    """
+    
+    # Auxiliary parameter:
+    # TODO what if lambda is zero or negative?
+    x = jnp.log(L)
+    coeffs = jnp.array([0.194, 0.0936, 0.0474, -4.21e-3, 1.23e-4])
+    
+    ln_a = universal_relation(coeffs, x)
+    a = jnp.exp(ln_a)
+        
+    return a
+
+def L1_L2_to_a1_a2(L1:Float, L2:Float) -> tuple[Float, Float]:
+    a1 = _get_spin_induced_quadrupole_phase_coeff_high(L1)
+    a2 = _get_spin_induced_quadrupole_phase_coeff_high(L2)
+    return a1, a2
+
 def m1_m2_to_M_q(m1: Float, m2: Float) -> tuple[Float, Float]:
     """
     Transforms the primary mass m1 and secondary mass m2 to the total mass M
