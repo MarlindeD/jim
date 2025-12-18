@@ -22,7 +22,7 @@ from jimgw.core.single_event.waveform import RippleTaylorF2, RippleIMRPhenomD_NR
 from jimgw.core.prior import UniformPrior, CombinePrior, CosinePrior, SinePrior
 from jimgw.core.single_event.data import Data
 from jimgw.core.single_event.transforms import MassRatioToSymmetricMassRatioTransform, CompactnessToStoppingFrequencyTransform
-from jimgw.core.single_event.utils import C1_C2_to_f_stop, M_q_to_m1_m2
+from jimgw.core.single_event.utils import C1_C2_to_f_stop, Mc_q_to_m1_m2
 import utils
 
 import optax
@@ -246,7 +246,7 @@ def body(args):
         
         if args.waveform_approximant == "TaylorF2QM_taper":
             #Convert compactness to stopping frequency
-            m1, m2 = M_q_to_m1_m2(config['M_c'], config['q'])
+            m1, m2 = Mc_q_to_m1_m2(config['M_c'], config['q'])
             f_stop = C1_C2_to_f_stop(config['C_1'], config["C_2"], m1, m2)
 
             true_param = {
