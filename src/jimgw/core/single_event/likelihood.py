@@ -426,12 +426,19 @@ class HeterodynedTransientLikelihoodFD(BaseTransientLikelihoodFD):
         prior: Optional[Prior] = None,
         sample_transforms: list[BijectiveTransform] = [],
         likelihood_transforms: list[NtoMTransform] = [],
+        use_QM: bool = False,
+        TF2_SSM: bool = False,
+        sample_a: bool = True
     ):
         super().__init__(
             detectors, waveform, fixed_parameters, f_min, f_max, trigger_time
         )
 
         logging.info("Initializing heterodyned likelihood..")
+
+        self.use_QM = use_QM
+        self.TF2_SSM = TF2_SSM
+        self.sample_a = sample_a
 
         # Can use another waveform to use as reference waveform, but if not provided, use the same waveform
         if reference_waveform is None:
@@ -441,6 +448,7 @@ class HeterodynedTransientLikelihoodFD(BaseTransientLikelihoodFD):
             self.ref_params = ref_params.copy()
             logging.info(f"Reference parameters provided, which are {self.ref_params}")
         elif prior:
+            self.prior=prior
             logging.info("No reference parameters are provided, finding it...")
             ref_params = self.maximize_likelihood(
                 prior=prior,
@@ -494,19 +502,25 @@ class HeterodynedTransientLikelihoodFD(BaseTransientLikelihoodFD):
         f_max = jnp.max(f_valid)
         f_min = jnp.min(f_valid)
 
-        # Mask based on center frequencies to keep complete bins
+        mask_heterodyne_grid = jnp.where((freq_grid <= f_max) & (freq_grid >= f_min))[0]
+        mask_heterodyne_low = jnp.where(
+            (self.freq_grid_low <= f_max) & (self.freq_grid_low >= f_min)
+        )[0]
         mask_heterodyne_center = jnp.where(
             (self.freq_grid_center <= f_max) & (self.freq_grid_center >= f_min)
         )[0]
+        freq_grid = freq_grid[mask_heterodyne_grid]
+        self.freq_grid_low = self.freq_grid_low[mask_heterodyne_low]
         self.freq_grid_center = self.freq_grid_center[mask_heterodyne_center]
-        self.freq_grid_low = self.freq_grid_low[mask_heterodyne_center]
 
-        # For freq_grid (bin edges), we need n_center + 1 edges
-        # Keep edges from first valid center to last valid center + 1
-        start_idx = mask_heterodyne_center[0]
-        end_idx = mask_heterodyne_center[-1] + 2
-        # +1 for inclusive, +1 for the extra edge
-        freq_grid = freq_grid[start_idx:end_idx]
+        # Ensure frequency grids have same length
+        if len(self.freq_grid_low) > len(self.freq_grid_center):
+            self.freq_grid_low = self.freq_grid_low[: len(self.freq_grid_center)]
+        # #Trim both to the **minimum length** of the two
+        # min_len = min(len(self.freq_grid_low), len(self.freq_grid_center))
+        # self.freq_grid_low = self.freq_grid_low[:min_len]
+        # self.freq_grid_center = self.freq_grid_center[:min_len]
+
 
         h_sky_low = reference_waveform(self.freq_grid_low, self.ref_params)
         h_sky_center = reference_waveform(self.freq_grid_center, self.ref_params)
@@ -539,6 +553,17 @@ class HeterodynedTransientLikelihoodFD(BaseTransientLikelihoodFD):
         params["trigger_time"] = self.trigger_time
         params["gmst"] = self.gmst
         params.update(self.fixed_parameters)
+
+        #I Think this block can be removed as the BNS/BBS informed transform already does what I tried to do here
+        # use_informed = True #TODO: move this up, this is a temporary fix!!!
+        
+        # if self.TF2_SSM and self.use_QM:
+        #     if not self.sample_a and not use_informed:
+        #         print("Calculate a1 and a2 from tidal deformability")
+        #         a1, a2 = L1_L2_to_a1_a2(params["lambda_1"], params["lambda_2"])
+        #         params["a_1"] = a1
+        #         params["a_2"] = a2
+
         # evaluate the waveforms as usual
         return self._likelihood(params, data)
 

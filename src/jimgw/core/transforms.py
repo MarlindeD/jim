@@ -51,11 +51,12 @@ class NtoMTransform(Transform):
         """
         x_copy = x.copy()
         output_params = self.transform_func(x_copy)
-        jax.tree.map(
+        #print(x_copy)
+        jax.tree_util.tree_map(
             lambda key: x_copy.pop(key),
             self.name_mapping[0],
         )
-        jax.tree.map(
+        jax.tree_util.tree_map(
             lambda key: x_copy.update({key: output_params[key]}),
             list(output_params.keys()),
         )

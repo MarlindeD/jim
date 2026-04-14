@@ -8,6 +8,7 @@ from jimgw.core.transforms import (
     ConditionalBijectiveTransform,
     BijectiveTransform,
     reverse_bijective_transform,
+    NtoMTransform
 )
 from jimgw.core.single_event.utils import (
     m1_m2_to_Mc_q,
@@ -16,6 +17,14 @@ from jimgw.core.single_event.utils import (
     Mc_eta_to_m1_m2,
     q_to_eta,
     eta_to_q,
+    L1_L2_to_a1_a2,
+    MB_m_to_L,
+    MB_m_to_C,
+    k2,
+    m_L_to_M_B,
+    tidal_from_mass,
+    m1_m2_C2_to_f_Roche,
+    m1_m2_to_f_RLO,
     ra_dec_to_zenith_azimuth,
     zenith_azimuth_to_ra_dec,
     euler_rotation,
@@ -574,3 +583,211 @@ class SourceToDetectorFrameChirpMassTransform(ConditionalBijectiveTransform):
             return {"M_c": M_c_source}
 
         self.inverse_transform_func = named_inverse_transform
+
+
+## ADD COMPACTNESS TO STOPPING FREQUENCY TRANSFORM ##
+@jaxtyped(typechecker=typechecker)
+class CompactnessToStoppingFrequencyTransform(ConditionalBijectiveTransform):
+    """
+    Transform compactness parameters (C1, C2) to f_stop using component masses (m1, m2).
+
+    Parameters
+    ----------
+    name_mapping : tuple[list[str], list[str]]
+        Mapping between input (C1, C2) and output (f_stop).
+    conditional_names : list[str]
+        Conditional parameters required by the transformation, i.e. m1 and m2.
+    """
+
+    def __init__(self):
+        name_mapping = (["C_1", "C_2"], ["f_stop"])
+        conditional_names = ["M_c", "eta"]
+        super().__init__(name_mapping, conditional_names)
+
+        def named_transform(x):
+            m1, m2 = Mc_eta_to_m1_m2(x["M_c"], x["eta"])
+            f_stop = C1_C2_to_f_stop(x["C_1"], x["C_2"], m1, m2)
+            return {"f_stop": f_stop}
+
+        #The inverse function does not exist
+        def named_inverse_transform(x):
+            raise NotImplementedError(
+                "Inverse transform for CompactnessToFStopTransform is not defined."
+            )
+
+        self.transform_func = named_transform
+        self.inverse_transform_func = named_inverse_transform
+
+## ADD TRANSFORMS FOR IMFORMED WAVEFORM ##
+
+class BNSInformedParameterTransform(NtoMTransform):
+    """
+    Use prior knowledge relations between parameters to find values for a's and f_stop based on the individual masses in the case of a BNS
+    """
+    def __init__(self):
+        #We remove M_c and q, then re-add them together with new params
+        name_mapping = ([], ["a_1", "a_2"])#, "f_stop"])
+        super().__init__(name_mapping, )
+
+        def named_transform(x):
+            M_c = x["M_c"]
+            q = x["q"]
+
+            # Convert to component masses
+            m1, m2 = Mc_q_to_m1_m2(M_c, q)
+
+            a_1, a_2 = L1_L2_to_a1_a2(x["lambda_1"], x["lambda_2"], "BNS")
+            f_stop = m1_m2_to_f_RLO(m1, m2)
+
+            return {
+                "a_1": jnp.array(a_1, dtype=jnp.float64),
+                "a_2": jnp.array(a_2, dtype=jnp.float64),
+                #"f_stop": jnp.array(f_stop, dtype=jnp.float64),
+            }
+        
+        #The inverse function does not exist
+        def named_inverse_transform(x):
+            raise NotImplementedError(
+                "Inverse transform is not defined."
+            )
+
+        self.transform_func = named_transform
+
+class BBSInformedParameterTransform(NtoMTransform):
+    """
+    Use prior knowledge relations between parameters to find values for a's and f_stop based on the individual masses in the case of a BBS
+    """
+    def __init__(self):
+        name_mapping = ([], ["a_1", "a_2"])#, "f_stop"])
+        super().__init__(name_mapping, )
+
+        def named_transform(x):
+            M_c = x["M_c"]
+            q = x["q"]
+
+            # Convert to component masses
+            m1, m2 = Mc_q_to_m1_m2(M_c, q)
+            M_B_1 = m_L_to_M_B(m1, x["lambda_1"])
+            M_B_2 = m_L_to_M_B(m2, x["lambda_2"])
+            a_1, a_2 = L1_L2_to_a1_a2(x["lambda_1"], x["lambda_2"], "BBS")
+            #New fit for QM parameter which can be used for spins up to 0.5
+            #a_1 = k2(m1, M_B_1, x["s1_z"])
+            #a_2 = k2(m2, M_B_2, x["s2_z"])
+            f_stop = m1_m2_to_f_RLO(m1, m2)
+
+            return {
+                "a_1": a_1,
+                "a_2": a_2,
+                #"f_stop": jnp.array(f_stop, dtype=jnp.float64),
+            }
+        
+        #The inverse function does not exist
+        def named_inverse_transform(x):
+            raise NotImplementedError(
+                "Inverse transform is not defined."
+            )
+
+        self.transform_func = named_transform
+
+
+class RLOStoppingFrequencyTransform(NtoMTransform):
+    """
+    Use prior knowledge relations between parameters to find values for a's and f_stop based on the individual masses in the case of a BBS
+    """
+    def __init__(self):
+        name_mapping = ([], ["f_stop"])
+        super().__init__(name_mapping, )
+
+        def named_transform(x):
+            M_c = x["M_c"]
+            q = x["q"]
+
+            # Convert to component masses
+            m1, m2 = Mc_q_to_m1_m2(M_c, q)
+
+            f_stop = m1_m2_to_f_RLO(m1, m2)
+
+            return {
+                "f_stop": f_stop,
+            }
+        
+        #The inverse function does not exist
+        def named_inverse_transform(x):
+            raise NotImplementedError(
+                "Inverse transform is not defined."
+            )
+
+        self.transform_func = named_transform
+
+class RocheStoppingFrequencyTransform(NtoMTransform):
+    """
+    Use prior knowledge relations between parameters to find values for a's and f_stop based on the individual masses in the case of a BBS
+    """
+    def __init__(self):
+        name_mapping = ([], ["f_stop"])
+        super().__init__(name_mapping, )
+
+        def named_transform(x):
+            M_c = x["M_c"]
+            q = x["q"]
+
+            # Convert to component masses
+            m1, m2 = Mc_q_to_m1_m2(M_c, q)
+
+            if "M_B" not in x:
+                M_B = m_L_to_M_B(m2, x["lambda_2"])
+            else:
+                M_B = x["M_B"]
+
+            C_2 = MB_m_to_C(M_B, m2)
+            f_stop = m1_m2_C2_to_f_Roche(m1, m2, C_2)
+
+            return {
+                "f_stop": f_stop,
+            }
+        
+        #The inverse function does not exist
+        def named_inverse_transform(x):
+            raise NotImplementedError(
+                "Inverse transform is not defined."
+            )
+
+        self.transform_func = named_transform
+
+class FullBBSInformedParameterTransform(NtoMTransform):
+    """
+    Use prior knowledge relations between parameters to find values for lambda's, a's and f_stop based on the individual masses and mass parameter M_B in the case of a BBS
+    """
+    def __init__(self):
+        name_mapping = (["M_B"], ["lambda_1", "lambda_2", "a_1", "a_2", "f_stop"])
+        super().__init__(name_mapping, )
+
+        def named_transform(x):
+            M_c = x["M_c"]
+            q = x["q"]
+
+            # Convert to component masses
+            m1, m2 = Mc_q_to_m1_m2(M_c, q)
+            #TODO: the tidal_from_mass function is inefficient, improve tidal calculation
+            L_1 = tidal_from_mass(m1, x["M_B"])
+            L_2 = tidal_from_mass(m2, x["M_B"])
+            a_1, a_2 = L1_L2_to_a1_a2(L_1, L_2, "BBS")
+            C_2 = MB_m_to_C(x["M_B"], m2)
+            #TODO: Remove f_stop from fullBBS -> make it optional and use RocheStoppingFrequencyTransform instead
+            f_stop = m1_m2_C2_to_f_Roche(m1, m2, C_2)
+
+            return {
+                "lambda_1": L_1,
+                "lambda_2": L_2,
+                "a_1": a_1,
+                "a_2": a_2,
+                "f_stop": f_stop,
+            }
+        
+        #The inverse function does not exist
+        def named_inverse_transform(x):
+            raise NotImplementedError(
+                "Inverse transform is not defined."
+            )
+
+        self.transform_func = named_transform

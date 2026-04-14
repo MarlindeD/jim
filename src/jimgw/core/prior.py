@@ -389,6 +389,29 @@ class CombinePrior(CompositePrior):
             output += prior.log_prob(z)
         return output
 
+    def remove_parameter(self, name: str):
+        """
+        Return a new CombinePrior with `name` and its prior removed.
+        """
+        new_base_prior = []
+        removed = False
+
+        for prior in self.base_prior:
+            if hasattr(prior, "parameter_names") and name in prior.parameter_names:
+                removed = True
+                continue
+            new_base_prior.append(prior)
+
+        if not removed:
+            #raise ValueError(f"No prior found for parameter '{name}'")
+            print(f"{name} not found in the prior, already removed")
+
+        return CombinePrior(new_base_prior)
+    
+    def has_param(prior, name: str) -> bool:
+        return name in prior.parameter_names
+
+
 
 @jaxtyped(typechecker=typechecker)
 class UniformPrior(SequentialTransformPrior):

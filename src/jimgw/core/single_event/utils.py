@@ -3,6 +3,11 @@ from jaxtyping import Array, Float, Complex
 
 from jimgw.core.constants import MTSUN
 from jimgw.core.utils import safe_arctan2, carte_to_spherical_angles
+from scipy.optimize import root_scalar
+
+import jax
+from jax import vmap
+
 
 
 def complex_inner_product(
@@ -54,6 +59,233 @@ def inner_product(
     """
     return complex_inner_product(h1, h2, psd, df).real
 
+## F_STOP RELATED EQUATIONS ##
+def C1_C2_to_f_stop(C1: float, C2: float, m1: float, m2:float):
+    """
+    Transforms the primary compactness C1 and the secondary compactness C2 to the stopping frequecy f_stop.
+    (based on https://arxiv.org/pdf/2505.16380)
+
+    Args:
+        C1 (float): Primary compactness.
+        C2 (float): Seconday compactness.
+        m1 (Float): Primary mass.
+        m2 (Float): Secondary mass.
+
+    Returns:
+        float: The stopping frequency (f_stop)
+    """
+    M_tot = (m1 + m2) * MTSUN
+    f_ISCO = 1/(6**(3/2) * jnp.pi * M_tot)
+    f_ECO = (C1 + C2)**(3/2) * f_ISCO
+    return f_ECO
+
+def m1_m2_to_f_RLO(m1:float, m2:float) -> float:
+    """
+    Transforms the masses of the binary into the roche lobe overflow frequency
+
+    Args:
+        m1 (float): Mass of the primary object
+        m2 (float): Mass of the secondary object
+
+    Returns:
+        float: The Roche lobe overflow frequency
+    """
+    params = [-26.9, -35.5, -3.02, 1690., 575.]
+    return params[0] + params[1]*m1 + params[2]*m1**2 + params[3]*m2 + params[4]*m2**2
+
+## TIDAL DEFORMABILITY RELATED EQUATIONS ##
+
+## QM RELATED EQUATIONS ##
+def universal_relation(coeffs: Array, x: float):
+    """Applies the general formula of a universal relationship, which is a quartic polynomial.
+
+    Args:
+        coeffs (Array): Array of coefficients for the quartic polynomial, starting from the constant term and going to the fourth order.
+        x (float): Variable of quartic polynomial
+
+    Returns:
+        float: Result of universal relation
+    """
+    return coeffs[0] + coeffs[1] * x + coeffs[2] * (x ** 2) + coeffs[3] * (x ** 3) + coeffs[4] * (x ** 4)
+
+def _get_QM_params_NS(L:Float) -> Float:
+    """Compute the quantity from equation (11) from http://arxiv.org/abs/1503.05405
+
+    Args:
+        L (float): Tidal deformability of object
+        mass (float): Mass of object in solar masses
+
+    Returns:
+        float: a(m) as defined in equation (11) of http://arxiv.org/abs/1503.05405
+    """
+    
+    # Auxiliary parameter:
+    # TODO what if lambda is zero or negative?
+    x = jnp.log(L)
+    coeffs = jnp.array([0.194, 0.0936, 0.0474, -4.21e-3, 1.23e-4])
+    
+    ln_a = universal_relation(coeffs, x)
+    a = jnp.exp(ln_a)
+        
+    return a
+
+def _get_QM_params_BS(L:Float) -> Float:
+    """
+    Compute the QM parameter kappa for a BS
+    
+    Args:
+        L (float): Tidal deformability of object
+
+    Returns:
+        float: kappa(m) as defined in equation (39) of http://arxiv.org/abs/2203.07442
+    """
+    
+    # Auxiliary parameter:
+    # TODO what if lambda is zero or negative?
+    ln_L = jnp.log(L)
+    coeffs = jnp.array([1.2, 0.32])
+    
+    ln_kappa = coeffs[0] + coeffs[1]*ln_L
+    kappa = jnp.exp(ln_kappa)
+        
+    return kappa
+
+def _logLto_MbyMB(logL:Float) -> Float:
+    """
+    Calculate the ratio M/M_B from the dimensionless tidal deformability
+    equation 9 of http://arxiv.org/abs/2007.05264
+    
+    Args:
+        logL (float): The log Tidal deformability
+    
+    Returns:
+        float: the ratio M/M_B
+    """
+    const = jnp.sqrt(2)/(8*jnp.sqrt(8))
+    return const*(-0.828 + 20.99*logL**(-1) - 99.1*logL**(-2) + 149.7*logL**(-3))
+
+def MB_m_to_L(M_B:Float, m:Float,  x_bracket=(0.1, 20)) -> Float:
+    """
+    Calculate the dimensionless tidal deformability of a massive boson star (BS)    Args:
+        M_B (float): The boson star mass parameter in solar mass
+        m (float): mass of the object in solar mass
+    
+    Returns:
+        float: the dimensionless tidal deformability Lambda of the BS
+    """
+    ratio = m/M_B
+    def equation(x):
+        return _logLto_MbyMB(x) - ratio
+    
+    sol = root_scalar(equation, bracket=x_bracket, method="brentq")
+    if not sol.converged:
+        raise RuntimeError("Could not compute lambda from mass and mass ratio M_B!")
+    logL = sol.root
+    return jnp.exp(logL)
+
+Lambda = jnp.linspace(289, 1e8, 10000)
+
+def mass_from_tidal(M_B):
+    #Calculates the mass deformability for a range of tidal deformablities
+    prefactor = jnp.sqrt(2) * M_B / (8*jnp.sqrt(jnp.pi))
+    log_L = jnp.log(Lambda)
+    factors = [-0.828, 20.99, -99.1, 149.7]
+    mass =  prefactor * (factors[0] + factors[1]/log_L + factors[2]/log_L**2 + factors[3]/log_L**3)
+    return mass, Lambda
+
+def m_L_to_M_B(m, Lambda):
+    """
+    Calculate the boson mass parameter M_B from mass and tidal deformability
+    """
+    prefactor = jnp.sqrt(2) / (8*jnp.sqrt(jnp.pi))
+    log_L = jnp.log(Lambda)
+    factors = [-0.828, 20.99, -99.1, 149.7]
+    m_by_MB =  prefactor * (factors[0] + factors[1]/log_L + factors[2]/log_L**2 + factors[3]/log_L**3)
+    return m/m_by_MB
+
+
+def tidal_from_mass(M, M_B):
+    """
+    Inverts mass_from_tidal to obtain Lambda given mass M.
+    """
+    mass, Lambda = mass_from_tidal(M_B)
+    sort_idx = jnp.argsort(mass)
+    masses_sorted = mass[sort_idx]
+    lambdas_sorted = Lambda[sort_idx]
+    # if M > masses_sorted[-1]:
+    #     raise ValueError(f"Given mass is larger than the maximum allowed mass! Max mass = {masses_sorted[-1]}")
+    return jnp.interp(M, masses_sorted, lambdas_sorted)
+
+
+def MB_m_to_C(M_B:Float, m:Float) -> Float:
+    """
+    Calculate the compactness from mass and the boson mass parameter M_B
+    Equation 4 of https://arxiv.org/abs/2408.14287
+
+    Args:
+        M_B (float): The boson star mass parameter in solar mass
+        m (float): mass of the object in solar mass
+    
+    Returns:
+        float: the compactness of the BS
+    """
+    C_inv = 6.5 + 48.8*(1-m/(0.06*M_B))**2
+    return 1/C_inv
+
+def L1_L2_to_a1_a2(L1:Float, L2:Float, sys:str) -> tuple[Float, Float]:
+    """
+    Calculate the QM parameter for a specific system
+
+    Args:
+        L1 (float): Tidal deformability of the primary object
+        L2 (float): Tidal deformability of the secundary object
+        sys (str): System type (supported: BNS, BBS), when invalid, assume BBH (a=1)
+    
+    Returns:
+       tuple[float, float]: the QM parameter of both objects
+    """
+    if sys == "BNS":
+        a1 = _get_QM_params_NS(L1)
+        a2 = _get_QM_params_NS(L2)
+    elif sys == "BBS":
+        a1 = _get_QM_params_BS(L1)
+        a2 = _get_QM_params_BS(L2)
+    else:
+        a1 = 1
+        a2 = 1
+        raise ValueError("nee")
+    return a1, a2
+
+def m1_m2_C2_to_f_Roche(m1: Float, m2:Float, C2:Float) -> Float:
+    """
+    Fucntion for computing the Roche frequency for massive boson stars
+    Equation 16 of https://arxiv.org/abs/2302.13954
+    Args:
+        m1 (float): mass of the primary object
+        m2 (float): mass of the secundary object
+        C2 (float): compactness of the secundary object
+    
+    Returns:
+        float: the Roche frequency
+    """
+    g = 2.44
+    q = m2/m1
+    M = (m1 + m2) * MTSUN
+    prefactor = 1/(jnp.pi * M) * (C2/g)**(3/2)
+    return prefactor * jnp.sqrt(3 + q + 3*q**(-1) + q**(-2))
+
+def k2(m, M_B, chi):
+    """
+    Fit function for the QM parameter for massive BSs as a function of mass, M_B and spin
+
+    m[float]: mass of the object in solar mass
+    M_B[float]: boson star mass parameter
+    chi[float]: dimensionless spin of the object
+    """
+    beta = m/M_B
+    #ensure that chi is positive
+    chi = jnp.abs(chi)
+    return 944.375 + -44735.2*beta + -1842.18*chi + 795246*beta**2 + 45923.3*beta*chi + 2503.8*chi**2 + -5.08843e06*beta**3 + -288243*beta**2*chi + -32066.1*beta*chi**2 + -1034.91*chi**3   
 
 def m1_m2_to_M_q(m1: Float, m2: Float) -> tuple[Float, Float]:
     """
